@@ -1,0 +1,14 @@
+# Static or tactical camera: one homography for the whole clip (Level 2).
+# Click the landmarks first:
+#   python scripts/annotate_landmarks.py --video <clip> --output data/annotations/landmarks_clip.json
+run_name: fixed_camera
+# Add `team` after the P6 stubs are implemented (Level 3).
+stages: [preprocess, detect, homography, track, project, analytics, render]
+
+homography:
+  mode: fixed
+  landmarks_path: data/annotations/landmarks_clip.json
+
+tracking:
+  tracker: bytetrack
+  space: image

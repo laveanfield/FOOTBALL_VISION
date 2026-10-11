@@ -1,0 +1,11 @@
+# Phase 0 "walking skeleton": video -> YOLO -> video with boxes.
+# Everything else in the pipeline plugs into this chain later.
+run_name: walking_skeleton
+stages: [preprocess, detect, render]
+
+video:
+  end_frame: 250          # about 10 s at 25 fps
+
+detection:
+  weights: yolov8n.pt     # smallest model for fast iteration
+  imgsz: 960

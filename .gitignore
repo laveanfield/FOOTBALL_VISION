@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Data and model artefacts (never commit raw video or weights)
+data/raw/*
+data/frames/
+data/annotations/*
+!data/raw/.gitkeep
+!data/annotations/.gitkeep
+weights/
+*.pt
+*.onnx
+*.engine
+
+# Pipeline outputs
+outputs/
+runs/
+
+# Notebooks and editors
+.ipynb_checkpoints/
+.idea/
+.vscode/
+.DS_Store

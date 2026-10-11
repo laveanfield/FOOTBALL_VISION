@@ -1,0 +1,94 @@
+# Reference configuration: every key with its default value.
+# Other files in this folder override only what they need; layer them with
+#   --config configs/default.yaml --config configs/fixed_camera.yaml
+run_name: debug
+output_dir: outputs
+seed: 42
+stages: [preprocess, detect, render]
+
+video:
+  path: null              # set with --set video.path=data/raw/clip.mp4
+  size: [1280, 720]       # (width, height) every frame is resized to
+  start_frame: 0
+  end_frame: null         # exclusive; null = until the end
+  stride: 1               # process every N-th frame
+
+preprocess:               # P1
+  detect_shots: false     # enable for broadcast footage (cuts, replays)
+  shot_threshold: 0.5
+  compute_pitch_mask: false
+  denoise: none           # none | gaussian | bilateral
+  use_clahe: false
+  grass_hsv_low: [35, 40, 40]
+  grass_hsv_high: [85, 255, 255]
+  morph_kernel: 7
+
+pitch:                    # P2
+  edge_method: canny      # canny | tophat
+  blur_sigma: 1.4
+  canny_low: 50
+  canny_high: 150
+  tophat_kernel: 15
+  hough_rho: 1.0
+  hough_threshold: 80
+  hough_min_length: 60
+  hough_max_gap: 10
+
+homography:               # P3
+  mode: fixed             # fixed (static camera) | propagate (moving camera)
+  landmarks_path: null    # JSON from scripts/annotate_landmarks.py
+  ransac_threshold_px: 3.0
+  feature: sift           # orb | sift | akaze
+  ratio_test: 0.75
+  min_inliers: 15
+  reanchor_overlay_threshold: 0.5
+  reanchor_every_n: 0     # 0 = only re-anchor on low overlay score
+  smoothing_window: 9
+
+detection:                # P4
+  weights: yolov8m.pt
+  imgsz: 1280
+  conf: 0.25
+  iou: 0.5
+  classes: [0, 32]        # COCO: 0 = person, 32 = sports ball
+  device: null
+  half: false
+  min_box_height_px: 20.0
+  use_pitch_mask: false
+  pitch_mask_margin_px: 10
+  use_tiling: false
+
+tracking:                 # P5
+  tracker: bytetrack      # bytetrack | sort
+  space: image            # image | pitch
+  high_thresh: 0.5
+  low_thresh: 0.1
+  match_thresh: 0.8
+  track_buffer: 30
+  min_track_len: 5
+  stitch: false           # enable once tracking.stitching is implemented
+  max_stitch_gap: 30
+
+team:                     # P6
+  n_clusters: 3
+  torso_top_ratio: 0.15
+  torso_bottom_ratio: 0.55
+  color_space: lab        # lab | hsv
+  exclude_grass: true
+
+analytics:                # P7
+  pitch_margin_m: 3.0
+  smooth_window: 15
+  smooth_polyorder: 2
+  max_gap_frames: 5
+  heatmap_cell_m: 1.0
+  heatmap_sigma_m: 2.0
+  max_speed_mps: 12.0
+  speed_zone_edges_kmh: [7.0, 14.0, 20.0, 25.0]
+  exclude_goalkeeper_from_shape: true
+
+viz:                      # P8
+  trail_length: 50
+  draw_pitch_lines: true
+  topdown_scale_px_per_m: 8.0
+  codec: mp4v

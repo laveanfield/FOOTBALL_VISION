@@ -1,0 +1,19 @@
+# Moving broadcast camera: shots, pitch masks, propagated homography.
+run_name: broadcast
+stages: [preprocess, pitch_lines, homography, detect, track, project, analytics, render]
+
+preprocess:
+  detect_shots: true
+  compute_pitch_mask: true
+  use_clahe: true
+
+detection:
+  use_pitch_mask: true
+
+homography:
+  mode: propagate
+  reanchor_overlay_threshold: 0.5
+  reanchor_every_n: 250
+
+tracking:
+  space: pitch
