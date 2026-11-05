@@ -8,6 +8,8 @@ import numpy as np
 import numpy.typing as npt
 
 from football_vision.datatypes import Homography, Points2D
+from football_vision.errors import HomographyError
+from football_vision.homography.dlt import estimate_homography_dlt, reprojection_error
 
 
 def ransac_num_iterations(
@@ -71,8 +73,66 @@ def estimate_homography_ransac(
         Tuple ``(homography, inlier_mask)`` where ``inlier_mask`` has shape ``(N,)``.
 
     Raises:
-        NotImplementedError: Stub; to be implemented by member B.
+        HomographyError: If fewer than four correspondences are given, the two
+            point sets differ in length, or no non-degenerate model is found.
     """
     # TODO(B): use homography.dlt.estimate_homography_dlt; compare with
     #   cv2.findHomography(..., cv2.RANSAC) and cv2.USAC_MAGSAC in ablation A2.
-    raise NotImplementedError("TODO(B): implement estimate_homography_ransac")
+    src = np.asarray(src_points, dtype=np.float64).reshape(-1, 2)
+    dst = np.asarray(dst_points, dtype=np.float64).reshape(-1, 2)
+    count = len(src)  # number of correspondences N
+    if count != len(dst) or count < 4:
+        raise HomographyError(
+            f"RANSAC needs at least 4 matching points, got {count} and {len(dst)}"
+        )
+    rng = np.random.default_rng(seed)
+    best_inliers = np.zeros(count, dtype=bool)  # inlier mask of the best model
+    best_homography: Homography | None = None
+    budget = max_iterations  # shrinks as the inlier ratio of the best model grows
+    iteration = 0
+    while iteration < budget:
+        iteration += 1
+        sample = rng.choice(count, size=4, replace=False)
+        # Skip degenerate samples: any three of the four source or target points
+        # being (nearly) collinear leaves the homography undetermined.
+        degenerate = False
+        for points in (src[sample], dst[sample]):
+            for skip in range(4):
+                a, b, c = np.delete(points, skip, axis=0)
+                area = abs(
+                    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+                )
+                scale = np.linalg.norm(b - a) * np.linalg.norm(c - a)
+                degenerate = degenerate or area <= 1e-6 * max(scale, 1e-12)
+        if degenerate:
+            continue
+        try:
+            candidate = estimate_homography_dlt(src[sample], dst[sample])
+        except (HomographyError, np.linalg.LinAlgError):
+            continue
+        error = reprojection_error(candidate, src, dst)
+        inliers = error < threshold  # NaN (point at infinity) compares as False
+        if inliers.sum() > best_inliers.sum() or best_homography is None:
+            best_inliers, best_homography = inliers, candidate
+            outlier_ratio = 1.0 - max(int(inliers.sum()), 4) / count
+            budget = min(
+                max_iterations,
+                ransac_num_iterations(confidence, min(outlier_ratio, 0.999)),
+            )
+    if best_homography is None or best_inliers.sum() < 4:
+        raise HomographyError("RANSAC found no valid homography")
+    # Final least-squares fits on all inliers; keep a refit only if it does not
+    # lose inliers.
+    for _ in range(3):
+        try:
+            refit = estimate_homography_dlt(src[best_inliers], dst[best_inliers])
+        except (HomographyError, np.linalg.LinAlgError):
+            break
+        refit_inliers = reprojection_error(refit, src, dst) < threshold
+        if refit_inliers.sum() < best_inliers.sum():
+            break
+        done = np.array_equal(refit_inliers, best_inliers)
+        best_homography, best_inliers = refit, refit_inliers
+        if done:
+            break
+    return best_homography, best_inliers
