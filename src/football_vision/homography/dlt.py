@@ -13,7 +13,8 @@ import numpy as np
 import numpy.typing as npt
 
 from football_vision.datatypes import Homography, Points2D
-from football_vision.homography.geometry import apply_homography
+from football_vision.errors import HomographyError
+from football_vision.homography.geometry import apply_homography, normalize_homography
 
 
 def hartley_normalization(points: Points2D) -> tuple[Points2D, npt.NDArray[np.float64]]:
@@ -30,11 +31,26 @@ def hartley_normalization(points: Points2D) -> tuple[Points2D, npt.NDArray[np.fl
         ``(3, 3)`` similarity matrix that produced the normalized points.
 
     Raises:
-        NotImplementedError: Stub; to be implemented by member B.
+        ValueError: If ``points`` is empty or all points coincide.
     """
     # TODO(B): centroid -> mean distance -> scale = sqrt(2) / mean_distance;
     #   build T = [[s, 0, -s*cx], [0, s, -s*cy], [0, 0, 1]].
-    raise NotImplementedError("TODO(B): implement hartley_normalization")
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    if len(pts) == 0:
+        raise ValueError("Cannot normalize an empty set of points")
+    centroid = pts.mean(axis=0)  # (cx, cy): point sent to the origin
+    mean_distance = np.linalg.norm(pts - centroid, axis=1).mean()
+    if mean_distance < 1e-12:
+        raise ValueError("Cannot normalize points that all coincide")
+    scale = np.sqrt(2.0) / mean_distance  # s: makes the mean distance sqrt(2)
+    transform = np.array(
+        [
+            [scale, 0.0, -scale * centroid[0]],
+            [0.0, scale, -scale * centroid[1]],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    return (pts - centroid) * scale, transform
 
 
 def estimate_homography_dlt(
@@ -57,12 +73,38 @@ def estimate_homography_dlt(
         The ``(3, 3)`` homography with ``H[2, 2] = 1``.
 
     Raises:
-        NotImplementedError: Stub; to be implemented by member B.
+        HomographyError: If fewer than four correspondences are given, the two
+            point sets differ in length, the points are degenerate (for example
+            all identical) or the solution cannot be scaled to ``H[2, 2] = 1``.
     """
     # TODO(B): validate N >= 4 and equal lengths (raise ValueError / HomographyError),
     #   build A, run np.linalg.svd, reshape the last row of Vt. Compare with
     #   cv2.findHomography (see tests/test_dlt_contract.py).
-    raise NotImplementedError("TODO(B): implement estimate_homography_dlt")
+    src = np.asarray(src_points, dtype=np.float64).reshape(-1, 2)
+    dst = np.asarray(dst_points, dtype=np.float64).reshape(-1, 2)
+    if len(src) != len(dst) or len(src) < 4:
+        raise HomographyError(
+            f"DLT needs at least 4 matching points, got {len(src)} and {len(dst)}"
+        )
+    t_src = np.eye(3)  # similarity applied to the source points (identity if off)
+    t_dst = np.eye(3)  # similarity applied to the target points (identity if off)
+    if normalize:
+        try:
+            src, t_src = hartley_normalization(src)
+            dst, t_dst = hartley_normalization(dst)
+        except ValueError as exc:
+            raise HomographyError(f"Degenerate DLT points: {exc}") from exc
+    x, y = src[:, 0], src[:, 1]
+    u, v = dst[:, 0], dst[:, 1]
+    zeros, ones = np.zeros(len(src)), np.ones(len(src))
+    # Two rows per correspondence (from x' x Hx = 0), stacked into A of shape (2N, 9).
+    rows_u = np.stack([-x, -y, -ones, zeros, zeros, zeros, u * x, u * y, u], axis=1)
+    rows_v = np.stack([zeros, zeros, zeros, -x, -y, -ones, v * x, v * y, v], axis=1)
+    matrix = np.concatenate([rows_u, rows_v], axis=0)
+    # h = right singular vector of the smallest singular value (last row of Vt).
+    h_hat = np.linalg.svd(matrix)[2][-1].reshape(3, 3)
+    homography = np.linalg.inv(t_dst) @ h_hat @ t_src
+    return normalize_homography(homography)
 
 
 def reprojection_error(
