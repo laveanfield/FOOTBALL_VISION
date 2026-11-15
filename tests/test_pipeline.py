@@ -15,6 +15,8 @@ from football_vision.artifacts import (
     HOMOGRAPHY_QUALITY_COLUMNS,
     META,
     OUTPUTS,
+    TEAM_LABEL_COLUMNS,
+    TEAM_LABELS,
     TRACK_COLUMNS,
     TRACKS,
     HomographySequence,
@@ -124,6 +126,96 @@ def test_tracking_stage_glue_with_a_fake_tracker(
     tracks = runner.ctx.store.read_table(TRACKS)
     assert list(tracks.columns) == list(TRACK_COLUMNS)
     assert set(tracks["track_id"]) == {1} and len(tracks) == N_FRAMES
+
+
+@pytest.mark.parametrize("tracker_name", ["sort", "bytetrack"])
+def test_tracking_stage_with_real_c2_trackers(
+    base_cfg: PipelineConfig, tracker_name: str
+) -> None:
+    """Checks real SortTracker and ByteTrackTracker inside TrackingStage."""
+    cfg = apply_overrides(
+        base_cfg,
+        {
+            "run_name": f"real_{tracker_name}",
+            "tracking.tracker": tracker_name,
+            "tracking.stitch": True,
+        },
+    )
+    runner = PipelineRunner(cfg, services={"detector": FakeDetector()})
+    runner.run(["preprocess", "detect", "track"])
+    tracks = runner.ctx.store.read_table(TRACKS)
+    assert list(tracks.columns) == list(TRACK_COLUMNS)
+    assert set(tracks["track_id"]) == {1} and len(tracks) == N_FRAMES
+
+
+def test_team_stage_colors_distinct_players(tmp_path: Path) -> None:
+    """Checks TeamStage groups distinct jersey colors and updates TRACKS."""
+    video_path = tmp_path / "team_clip.mp4"
+    writer = cv2.VideoWriter(
+        str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (320, 180)
+    )
+    if not writer.isOpened():
+        pytest.skip("OpenCV cannot write mp4 files in this environment")
+
+    boxes = np.array(
+        [
+            [40, 40, 60, 110],
+            [90, 40, 110, 110],
+            [190, 40, 210, 110],
+            [240, 40, 260, 110],
+        ],
+        dtype=np.float32,
+    )
+    colors = [(20, 20, 220), (20, 20, 220), (220, 40, 20), (220, 40, 20)]
+    for _ in range(6):
+        frame = np.full((180, 320, 3), (60, 140, 60), dtype=np.uint8)
+        for box, bgr in zip(boxes, colors, strict=True):
+            cv2.rectangle(
+                frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), bgr, -1
+            )
+        writer.write(frame)
+    writer.release()
+
+    class _FourPlayerDetector(Detector):
+        def detect(self, frame: Frame) -> Detections:
+            """Returns four stationary person boxes."""
+            return Detections(
+                boxes,
+                np.full(4, 0.95, dtype=np.float32),
+                np.zeros(4, dtype=np.int64),
+            )
+
+    cfg = apply_overrides(
+        PipelineConfig(),
+        {
+            "video.path": str(video_path),
+            "video.size": [320, 180],
+            "output_dir": str(tmp_path / "out"),
+            "run_name": "team_c3",
+            "tracking.tracker": "bytetrack",
+            "tracking.min_track_len": 2,
+            "team.n_clusters": 2,
+            "team.color_space": "lab",
+        },
+    )
+    runner = PipelineRunner(cfg, services={"detector": _FourPlayerDetector()})
+    runner.run(["preprocess", "detect", "track", "team"])
+
+    labels = runner.ctx.store.read_table(TEAM_LABELS)
+    tracks = runner.ctx.store.read_table(TRACKS)
+    assert list(labels.columns) == list(TEAM_LABEL_COLUMNS)
+    assert len(labels) == 4
+    assert set(labels["role"]) == {"player"}
+
+    # Map each track to its average x center to match red (left) vs blue (right).
+    centers = tracks.groupby("track_id")["x1"].mean().to_dict()
+    red_tids = [tid for tid, x1 in centers.items() if x1 < 150.0]
+    blue_tids = [tid for tid, x1 in centers.items() if x1 > 150.0]
+    label_map = dict(zip(labels["track_id"], labels["team"], strict=True))
+    assert len({label_map[t] for t in red_tids}) == 1
+    assert len({label_map[t] for t in blue_tids}) == 1
+    assert label_map[red_tids[0]] != label_map[blue_tids[0]]
+    assert set(tracks["role"]) == {"player"}
 
 
 def test_fixed_homography_stage_from_clicked_landmarks(

@@ -6,8 +6,42 @@ effective resolution, at the cost of speed and duplicate detections at tile bord
 
 from __future__ import annotations
 
+import numpy as np
+
+from football_vision.boxes import iou_matrix
 from football_vision.datatypes import Detections, Frame
 from football_vision.detection.base import Detector
+
+
+def _axis_starts(length: int, tile_len: int, overlap: float) -> list[int]:
+    """Computes monotonically increasing tile start coordinates along one axis."""
+    if tile_len >= length:
+        return [0]
+    step = max(1, int(round(tile_len * (1.0 - overlap))))
+    starts = [0]
+    pos = 0
+    while pos + tile_len < length:
+        pos = min(pos + step, length - tile_len)
+        if pos != starts[-1]:
+            starts.append(pos)
+    return starts
+
+
+def _nms_single_class(
+    boxes: np.ndarray, scores: np.ndarray, iou_threshold: float
+) -> list[int]:
+    """Applies greedy NMS to boxes of a single class, returning kept indices."""
+    order = np.argsort(-scores, kind="mergesort")
+    kept: list[int] = []
+    while len(order) > 0:
+        best = int(order[0])
+        kept.append(best)
+        if len(order) == 1:
+            break
+        rest = order[1:]
+        ious = iou_matrix(boxes[best : best + 1], boxes[rest])[0]
+        order = rest[ious <= iou_threshold]
+    return kept
 
 
 def tile_image(
@@ -25,10 +59,28 @@ def tile_image(
         corner of the tile in the full frame.
 
     Raises:
-        NotImplementedError: Stub; to be implemented by member C.
+        ValueError: If ``frame`` is empty, ``tile_size`` is non-positive, or
+            ``overlap`` is outside ``[0, 1)``.
     """
-    # TODO(C): step = tile * (1 - overlap); make sure the last tile reaches the border.
-    raise NotImplementedError("TODO(C): implement tile_image")
+    if frame.ndim < 2 or frame.shape[0] == 0 or frame.shape[1] == 0:
+        raise ValueError(f"Expected non-empty frame, got shape {frame.shape}")
+    tile_w, tile_h = int(tile_size[0]), int(tile_size[1])
+    if tile_w <= 0 or tile_h <= 0:
+        raise ValueError(f"tile_size dimensions must be positive, got {tile_size}")
+    if not (0.0 <= overlap < 1.0):
+        raise ValueError(f"overlap must be in [0, 1), got {overlap}")
+
+    img_h, img_w = int(frame.shape[0]), int(frame.shape[1])
+    x_starts = _axis_starts(img_w, tile_w, overlap)
+    y_starts = _axis_starts(img_h, tile_h, overlap)
+
+    tiles: list[tuple[Frame, tuple[int, int]]] = []
+    for y0 in y_starts:
+        y1 = min(y0 + tile_h, img_h)
+        for x0 in x_starts:
+            x1 = min(x0 + tile_w, img_w)
+            tiles.append((frame[y0:y1, x0:x1], (x0, y0)))
+    return tiles
 
 
 def merge_tile_detections(
@@ -47,10 +99,49 @@ def merge_tile_detections(
         The merged detections in full-frame coordinates.
 
     Raises:
-        NotImplementedError: Stub; to be implemented by member C.
+        ValueError: If ``per_tile`` and ``offsets`` have different lengths, or if
+            ``iou_threshold`` is outside ``[0, 1]``.
     """
-    # TODO(C): shift boxes by the offsets, concatenate, apply class-aware NMS.
-    raise NotImplementedError("TODO(C): implement merge_tile_detections")
+    if len(per_tile) != len(offsets):
+        raise ValueError(
+            f"per_tile ({len(per_tile)}) and offsets ({len(offsets)}) length mismatch"
+        )
+    if not (0.0 <= iou_threshold <= 1.0):
+        raise ValueError(f"iou_threshold must be in [0, 1], got {iou_threshold}")
+
+    boxes_parts: list[np.ndarray] = []
+    scores_parts: list[np.ndarray] = []
+    class_parts: list[np.ndarray] = []
+    for det, (ox, oy) in zip(per_tile, offsets, strict=True):
+        if len(det) == 0:
+            continue
+        shift = np.array([ox, oy, ox, oy], dtype=np.float32)
+        boxes_parts.append(det.boxes_xyxy.astype(np.float32) + shift)
+        scores_parts.append(det.scores.astype(np.float32))
+        class_parts.append(det.class_ids.astype(np.int64))
+
+    if not boxes_parts:
+        return Detections.empty()
+
+    all_boxes = np.vstack(boxes_parts)
+    all_scores = np.concatenate(scores_parts)
+    all_classes = np.concatenate(class_parts)
+
+    kept_global: list[int] = []
+    for cls_id in np.unique(all_classes):
+        cls_indices = np.flatnonzero(all_classes == cls_id)
+        local_kept = _nms_single_class(
+            all_boxes[cls_indices], all_scores[cls_indices], iou_threshold
+        )
+        kept_global.extend(int(cls_indices[idx]) for idx in local_kept)
+
+    kept_arr = np.asarray(kept_global, dtype=np.int64)
+    final_order = kept_arr[np.argsort(-all_scores[kept_arr], kind="mergesort")]
+    return Detections(
+        boxes_xyxy=all_boxes[final_order],
+        scores=all_scores[final_order],
+        class_ids=all_classes[final_order],
+    )
 
 
 class TiledDetector(Detector):

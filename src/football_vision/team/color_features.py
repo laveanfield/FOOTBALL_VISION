@@ -5,10 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal
 
+import cv2
 import numpy as np
 import numpy.typing as npt
 
+from football_vision.config import PreprocessConfig
 from football_vision.datatypes import Frame
+
+_DEFAULT_PREPROCESS = PreprocessConfig()
 
 
 def crop_torso(
@@ -51,20 +55,56 @@ def extract_color_feature(
     """Summarizes the jersey color of a torso crop as a feature vector.
 
     Convert the crop to ``color_space``, drop grass-colored pixels when
-    ``exclude_grass`` is set, and return a robust summary (median color, optionally
-    concatenated with a coarse histogram). Lab distances are closer to perceived
-    color differences than RGB distances.
+    ``exclude_grass`` is set, and return a robust summary (median color). Lab
+    distances are closer to perceived color differences than RGB distances; HSV
+    encodes hue via cosine/sine components to avoid wrap-around at red.
 
     Args:
         crop: BGR torso crop from :func:`crop_torso`.
-        color_space: Color space of the feature.
+        color_space: Color space of the feature (``"lab"`` or ``"hsv"``).
         exclude_grass: Whether to ignore pixels inside the grass HSV range.
 
     Returns:
         A feature vector of shape ``(D,)``, or ``None`` if no pixel remains.
 
     Raises:
-        NotImplementedError: Stub; to be implemented by member C.
+        ValueError: If ``color_space`` is neither ``"lab"`` nor ``"hsv"``.
     """
-    # TODO(C): reuse preprocessing.pitch_mask HSV bounds for the grass test.
-    raise NotImplementedError("TODO(C): implement extract_color_feature")
+    if color_space not in ("lab", "hsv"):
+        raise ValueError(f"Unsupported color space '{color_space}'")
+    if crop.size == 0 or crop.ndim != 3 or crop.shape[0] == 0 or crop.shape[1] == 0:
+        return None
+
+    hsv: npt.NDArray[np.uint8] | None = None
+    if exclude_grass or color_space == "hsv":
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+
+    if exclude_grass:
+        assert hsv is not None
+        low = np.asarray(_DEFAULT_PREPROCESS.grass_hsv_low, dtype=np.uint8)
+        high = np.asarray(_DEFAULT_PREPROCESS.grass_hsv_high, dtype=np.uint8)
+        grass_mask = cv2.inRange(hsv, low, high) > 0
+        keep_mask = ~grass_mask
+    else:
+        keep_mask = np.ones(crop.shape[:2], dtype=bool)
+
+    if not np.any(keep_mask):
+        return None
+
+    if color_space == "lab":
+        lab = cv2.cvtColor(crop, cv2.COLOR_BGR2Lab)
+        pixels = lab[keep_mask].astype(np.float64)
+        return np.median(pixels, axis=0)
+
+    assert hsv is not None
+    hsv_pixels = hsv[keep_mask].astype(np.float64)
+    angles = (2.0 * np.pi / 180.0) * hsv_pixels[:, 0]
+    encoded = np.column_stack(
+        [
+            127.5 * np.cos(angles),
+            127.5 * np.sin(angles),
+            hsv_pixels[:, 1],
+            hsv_pixels[:, 2],
+        ]
+    )
+    return np.median(encoded, axis=0)
