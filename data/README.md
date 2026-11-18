@@ -17,7 +17,21 @@ broadcast clip for the moving-camera experiments. Check the terms of public data
 
 | Clip | Source | License / terms | fps | Size | Duration | Role |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| v_HdiyOtliFiw_c004 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 41.0 s | homography eval (landmarks f675–f1020) |
+| v_HdiyOtliFiw_c003 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 31.0 s | homography eval (landmarks f175–f525) |
+| v_1yHWGw8DH4A_c047 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 21.5 s | tracking/detection |
+| v_1yHWGw8DH4A_c609 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 20.0 s | hard case (smoke) |
+| v_1yHWGw8DH4A_c029 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 29.0 s | spare |
+| v_1yHWGw8DH4A_c077 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 47.9 s | spare |
+| v_1yHWGw8DH4A_c601 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 22.1 s | spare |
+| v_1yHWGw8DH4A_c610 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 21.4 s | spare (smoke) |
+| v_HdiyOtliFiw_c008 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 22.0 s | spare |
+| v_HdiyOtliFiw_c010 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 35.7 s | spare |
+| v_HdiyOtliFiw_c602 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 19.0 s | spare |
+| v_gQNyhv8y0QY_c003 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 28.0 s | spare |
+| v_gQNyhv8y0QY_c012 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 53.0 s | spare |
+| v_gQNyhv8y0QY_c013 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 35.0 s | spare |
+| v_iIxMOsCGH58_c013 | SportsMOT (MultiSports, YouTube) | CC BY-NC 4.0 | 25 | 1280x720 | 18.0 s | spare |
 
 ## Reproducing the SportsMOT clips
 
