@@ -76,8 +76,6 @@ def estimate_homography_ransac(
         HomographyError: If fewer than four correspondences are given, the two
             point sets differ in length, or no non-degenerate model is found.
     """
-    # TODO(B): use homography.dlt.estimate_homography_dlt; compare with
-    #   cv2.findHomography(..., cv2.RANSAC) and cv2.USAC_MAGSAC in ablation A2.
     src = np.asarray(src_points, dtype=np.float64).reshape(-1, 2)
     dst = np.asarray(dst_points, dtype=np.float64).reshape(-1, 2)
     count = len(src)  # number of correspondences N

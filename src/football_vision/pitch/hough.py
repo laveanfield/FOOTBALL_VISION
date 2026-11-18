@@ -20,6 +20,8 @@ _MIN_FAMILY_SEGMENT_PX = 20.0
 # A segment deviating more than this from the mean direction of its family is
 # reported as an outlier (perspective makes a family fan out, so this is generous).
 _MAX_FAMILY_SPREAD_RAD = np.deg2rad(45.0)
+# Clusters whose mean orientations differ by less than this belong to one family.
+_MIN_FAMILY_SEPARATION_RAD = np.deg2rad(15.0)
 _KMEANS_MAX_ITERATIONS = 50
 
 
@@ -89,8 +91,6 @@ def detect_line_segments(edges: Mask, cfg: PitchConfig) -> npt.NDArray[np.float6
         Array of shape ``(N, 4)`` holding ``(x1, y1, x2, y2)`` per segment. It has
         shape ``(0, 4)`` when nothing is found.
     """
-    # TODO(A): cv2.HoughLinesP(edges, cfg.hough_rho, np.pi / 180, cfg.hough_threshold,
-    #   minLineLength=cfg.hough_min_length, maxLineGap=cfg.hough_max_gap).
     lines = cv2.HoughLinesP(
         edges,
         cfg.hough_rho,
@@ -136,28 +136,24 @@ def merge_collinear_segments(
 ) -> npt.NDArray[np.float64]:
     """Merges segments that lie on the same physical pitch line.
 
-    Hough returns many fragments per marking. Convert each segment to ``(rho, theta)``,
-    group those closer than the tolerances, and replace each group by the segment
-    spanning its extreme endpoints.
-
-    Two segments are in the same group when their directions differ by at most
-    ``theta_tolerance_rad`` and the midpoint of each lies within ``rho_tolerance_px``
-    of the other's line. Measuring the distance to the line, rather than comparing
-    ``rho`` values, makes the test independent of the wrap-around of ``theta`` at
-    0 and pi, where ``rho`` changes sign. Grouping is transitive. Each group becomes
-    one segment on the length-weighted best-fit line, spanning the extreme
-    endpoints; its endpoints are ordered by increasing ``x``. Zero-length segments
-    are dropped.
+    Hough returns many fragments per marking. Two segments are in the same group
+    when their directions differ by at most ``theta_tolerance_rad`` (modulo ``pi``)
+    and the midpoint of each lies within ``rho_tolerance_px`` of the other's line.
+    Measuring the distance to the line, rather than comparing ``rho`` directly,
+    makes the test independent of the wrap-around of ``theta`` at 0 and pi, where
+    ``rho`` changes sign. Grouping is transitive. Each group becomes one segment on
+    the length-weighted best-fit line, spanning the extreme endpoints. Zero-length
+    segments are dropped.
 
     Args:
         segments: Array of shape ``(N, 4)`` with ``(x1, y1, x2, y2)``.
-        rho_tolerance_px: Maximum ``rho`` difference inside a group.
-        theta_tolerance_rad: Maximum ``theta`` difference inside a group.
+        rho_tolerance_px: Maximum point-to-line distance in pixels inside a group.
+        theta_tolerance_rad: Maximum orientation difference in radians inside a
+            group.
 
     Returns:
         Array of shape ``(M, 4)`` with ``M <= N`` merged segments.
     """
-    # TODO(A): handle the theta wrap-around at 0/pi; weight groups by segment length.
     seg = np.asarray(segments, dtype=np.float64).reshape(-1, 4)
     delta = seg[:, 2:] - seg[:, :2]
     length = np.hypot(delta[:, 0], delta[:, 1])
@@ -184,6 +180,53 @@ def merge_collinear_segments(
     return np.asarray(merged, dtype=np.float64).reshape(-1, 4)
 
 
+def _circular_mean_direction(
+    angles: npt.NDArray[np.float64], weights: npt.NDArray[np.float64]
+) -> float:
+    """Computes the length-weighted mean line orientation in ``(-pi/2, pi/2]``."""
+    return float(
+        0.5
+        * np.arctan2(
+            np.sum(weights * np.sin(2.0 * angles)),
+            np.sum(weights * np.cos(2.0 * angles)),
+        )
+    )
+
+
+def _merge_parallel_clusters(
+    raw: npt.NDArray[np.int64],
+    angle: npt.NDArray[np.float64],
+    weight: npt.NDArray[np.float64],
+    min_separation_rad: float,
+) -> tuple[npt.NDArray[np.int64], dict[int, float]]:
+    """Merges clusters whose mean orientations differ by less than the threshold."""
+    cluster_ids = np.unique(raw)
+    directions = np.array(
+        [
+            _circular_mean_direction(angle[raw == cid], weight[raw == cid])
+            for cid in cluster_ids
+        ],
+        dtype=np.float64,
+    )
+    angle_gap = np.abs(
+        (directions[:, None] - directions[None, :] + np.pi / 2.0) % np.pi
+        - np.pi / 2.0
+    )
+    _, merged_groups = _connected_components(angle_gap < min_separation_rad)
+    remap = {
+        int(cid): int(group)
+        for cid, group in zip(cluster_ids, merged_groups, strict=True)
+    }
+    merged_raw = np.array([remap[int(cid)] for cid in raw], dtype=np.int64)
+    mean_direction = {
+        int(group): _circular_mean_direction(
+            angle[merged_raw == group], weight[merged_raw == group]
+        )
+        for group in np.unique(merged_raw)
+    }
+    return merged_raw, mean_direction
+
+
 def cluster_line_families(
     segments: npt.NDArray[np.float64], n_families: int = 2
 ) -> npt.NDArray[np.int64]:
@@ -196,11 +239,13 @@ def cluster_line_families(
     This implementation clusters by orientation only. Angles are embedded as
     ``(cos 2a, sin 2a)`` so that directions just below pi and just above 0 fall in
     the same cluster, and a small deterministic k-means (written with NumPy) is run
-    with the segment lengths as weights. Labels
-    are ordered by orientation: ``0`` is the family closest to horizontal in the
-    image, so the label keeps its meaning from frame to frame. Segments shorter
-    than 20 px, or more than 45 degrees away from the mean direction of their
-    cluster, get ``-1``.
+    with the segment lengths as weights. Clusters whose mean directions differ by
+    less than 15 degrees are merged so a single visible family is not split in two.
+    When two families are requested and only one remains after merging, it receives
+    label ``0`` if its mean direction is within 45 degrees of horizontal and ``1``
+    otherwise; with multiple families, labels are ordered by increasing tilt from
+    horizontal so ``0`` stays closest to horizontal. Segments shorter than 20 px, or
+    more than 45 degrees away from the mean direction of their cluster, get ``-1``.
 
     Args:
         segments: Array of shape ``(N, 4)`` with ``(x1, y1, x2, y2)``.
@@ -210,8 +255,7 @@ def cluster_line_families(
         Integer array of shape ``(N,)`` with the family label of each segment
         (``-1`` for outliers).
     """
-    # TODO(A): start with KMeans on the segment angle, then refine with
-    #   vanishing points.
+    # TODO(A): optionally refine orientation clusters with RANSAC vanishing points.
     seg = np.asarray(segments, dtype=np.float64).reshape(-1, 4)
     labels = np.full(len(seg), -1, dtype=np.int64)
     delta = seg[:, 2:] - seg[:, :2]
@@ -223,22 +267,21 @@ def cluster_line_families(
     weight = length[usable]
     embedding = np.stack([np.cos(2 * angle), np.sin(2 * angle)], axis=1)
     if usable.size <= n_families:
-        raw = np.arange(usable.size)
+        raw = np.arange(usable.size, dtype=np.int64)
     else:
         raw = _weighted_kmeans(embedding, weight, n_families)
-    # Mean direction of each cluster in (-pi/2, pi/2]; 0 is horizontal.
-    cluster_ids = np.unique(raw)
-    mean_direction = {}
-    for cluster in cluster_ids:
-        member = raw == cluster
-        mean_direction[cluster] = 0.5 * np.arctan2(
-            np.sum(weight[member] * np.sin(2 * angle[member])),
-            np.sum(weight[member] * np.cos(2 * angle[member])),
-        )
-    ranked = sorted(cluster_ids, key=lambda c: abs(mean_direction[c]))
-    rank_of = {cluster: rank for rank, cluster in enumerate(ranked)}
+    raw, mean_direction = _merge_parallel_clusters(
+        raw, angle, weight, _MIN_FAMILY_SEPARATION_RAD
+    )
+    cluster_ids = sorted(mean_direction)
+    if n_families == 2 and len(cluster_ids) == 1:
+        only = cluster_ids[0]
+        rank_of = {only: 0 if abs(mean_direction[only]) <= np.pi / 4.0 else 1}
+    else:
+        ranked = sorted(cluster_ids, key=lambda c: abs(mean_direction[c]))
+        rank_of = {cluster: rank for rank, cluster in enumerate(ranked)}
     for position, index in enumerate(usable):
-        cluster = raw[position]
+        cluster = int(raw[position])
         deviation = abs(
             (angle[position] - mean_direction[cluster] + np.pi / 2) % np.pi - np.pi / 2
         )

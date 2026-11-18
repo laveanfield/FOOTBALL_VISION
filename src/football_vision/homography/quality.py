@@ -40,8 +40,6 @@ def line_overlay_score(
         A score in ``[0, 1]``; higher is better. It is ``0.0`` when the matrix is
         singular or no sample projects inside the image.
     """
-    # TODO(B): cv2.distanceTransform on the inverted edge map; ignore samples that
-    #   project outside the image.
     edges = np.asarray(edge_map) > 0  # (H, W) bool, True on edge pixels
     height, width = edges.shape[:2]
     try:
@@ -109,7 +107,6 @@ def check_homography_validity(
     Returns:
         ``True`` if the homography passes all tests.
     """
-    # TODO(B): choose thresholds from the dev clip, then store them in HomographyConfig.
     matrix = np.asarray(homography, dtype=np.float64)
     if matrix.shape != (3, 3) or not np.isfinite(matrix).all():
         return False

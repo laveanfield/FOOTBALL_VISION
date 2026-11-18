@@ -26,20 +26,11 @@ FOUR_PIXELS = np.array(
     [[100.0, 100.0], [1100.0, 120.0], [1000.0, 650.0], [150.0, 600.0]]
 )
 
-dlt_todo = pytest.mark.xfail(
-    raises=NotImplementedError, reason="TODO(B): homography.dlt", strict=False
-)
-ransac_todo = pytest.mark.xfail(
-    raises=NotImplementedError, reason="TODO(B): homography.ransac", strict=False
-)
 kalman_todo = pytest.mark.xfail(
     raises=NotImplementedError, reason="TODO(C): tracking.kalman", strict=False
 )
 assign_todo = pytest.mark.xfail(
     raises=NotImplementedError, reason="TODO(C): tracking.association", strict=False
-)
-shots_todo = pytest.mark.xfail(
-    raises=NotImplementedError, reason="TODO(A): preprocessing.shots", strict=False
 )
 
 
@@ -50,7 +41,6 @@ def kalman_model(
     return constant_velocity_matrices(dt, process_std=0.5, measurement_std=0.3)
 
 
-@dlt_todo
 def test_hartley_normalization_centers_and_scales_points() -> None:
     """Checks zero centroid, mean distance sqrt(2) and a consistent transform."""
     points = np.random.default_rng(0).uniform(0, 1000, size=(10, 2))
@@ -62,7 +52,6 @@ def test_hartley_normalization_centers_and_scales_points() -> None:
     )
 
 
-@dlt_todo
 @pytest.mark.parametrize("normalize", [True, False])
 def test_dlt_recovers_a_homography_from_four_points(normalize: bool) -> None:
     """Checks that four exact correspondences determine the homography."""
@@ -72,7 +61,6 @@ def test_dlt_recovers_a_homography_from_four_points(normalize: bool) -> None:
     np.testing.assert_allclose(estimate, H_TRUE, rtol=1e-5, atol=1e-8)
 
 
-@dlt_todo
 def test_dlt_is_accurate_with_noisy_overdetermined_data() -> None:
     """Checks the least-squares solution with 30 noisy correspondences."""
     rng = np.random.default_rng(1)
@@ -84,7 +72,6 @@ def test_dlt_is_accurate_with_noisy_overdetermined_data() -> None:
     assert reprojection_error(estimate, pixels, meters).mean() < 0.1
 
 
-@ransac_todo
 def test_ransac_rejects_gross_outliers() -> None:
     """Checks that RANSAC finds the 28 inliers among 40 correspondences."""
     rng = np.random.default_rng(2)
@@ -164,7 +151,6 @@ def test_assignment_matches_optimally_and_applies_the_gate() -> None:
     assert solve_assignment(np.zeros((0, 3)), 0.5) == ([], [], [0, 1, 2])
 
 
-@shots_todo
 def test_histogram_distance_is_zero_for_equal_frames_and_one_for_disjoint_ones() -> (
     None
 ):

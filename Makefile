@@ -5,20 +5,20 @@
 VIDEO ?= data/raw/clip.mp4
 
 install:
-> pip install -e ".[dev]"
+> python -m pip install -e ".[dev]"
 
 lint:
-> ruff check .
+> python -m ruff check .
 
 format:
-> ruff format .
-> ruff check --fix .
+> python -m ruff format .
+> python -m ruff check --fix .
 
 docstyle:
-> pydoclint src tests scripts demo
+> python -m pydoclint.main src tests scripts demo
 
 test:
-> pytest
+> python -m pytest
 
 check: lint docstyle test
 

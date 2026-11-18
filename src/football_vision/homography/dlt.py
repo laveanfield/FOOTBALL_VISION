@@ -33,8 +33,6 @@ def hartley_normalization(points: Points2D) -> tuple[Points2D, npt.NDArray[np.fl
     Raises:
         ValueError: If ``points`` is empty or all points coincide.
     """
-    # TODO(B): centroid -> mean distance -> scale = sqrt(2) / mean_distance;
-    #   build T = [[s, 0, -s*cx], [0, s, -s*cy], [0, 0, 1]].
     pts = np.asarray(points, dtype=np.float64).reshape(-1, 2)
     if len(pts) == 0:
         raise ValueError("Cannot normalize an empty set of points")
@@ -77,9 +75,6 @@ def estimate_homography_dlt(
             point sets differ in length, the points are degenerate (for example
             all identical) or the solution cannot be scaled to ``H[2, 2] = 1``.
     """
-    # TODO(B): validate N >= 4 and equal lengths (raise ValueError / HomographyError),
-    #   build A, run np.linalg.svd, reshape the last row of Vt. Compare with
-    #   cv2.findHomography (see tests/test_dlt_contract.py).
     src = np.asarray(src_points, dtype=np.float64).reshape(-1, 2)
     dst = np.asarray(dst_points, dtype=np.float64).reshape(-1, 2)
     if len(src) != len(dst) or len(src) < 4:

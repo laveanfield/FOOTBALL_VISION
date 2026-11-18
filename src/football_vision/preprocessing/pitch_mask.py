@@ -52,7 +52,6 @@ def estimate_grass_hsv_range(
     Returns:
         Tuple ``(lower, upper)`` of HSV bounds in OpenCV scale.
     """
-    # TODO(A): histogram of the H channel -> dominant bin -> +/- tolerance range.
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     hue = hsv[..., 0].ravel().astype(np.intp)
     sat = hsv[..., 1].ravel()
@@ -132,8 +131,6 @@ def compute_pitch_mask(frame: Frame, cfg: PreprocessConfig) -> Mask:
     Returns:
         ``uint8`` mask of shape ``(H, W)`` with values 0 or 255.
     """
-    # TODO(A): cv2.inRange -> cv2.morphologyEx(OPEN, CLOSE) -> largest component
-    #   (cv2.connectedComponentsWithStats) -> fill holes (findContours + drawContours).
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = _mask_from_range(
         hsv, cfg.grass_hsv_low, cfg.grass_hsv_high, cfg.morph_kernel

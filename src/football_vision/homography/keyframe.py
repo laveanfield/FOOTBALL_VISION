@@ -133,8 +133,6 @@ def estimate_keyframe_homography_auto(
         HomographyError: If a family has fewer than two usable lines or no
             plausible hypothesis is found.
     """
-    # TODO(B): enumerate line pairings (prune with orientation/order constraints),
-    #   build the 4 correspondences, call the DLT, and rank by overlay score.
     height, width = frame.shape[:2]
     seg = np.asarray(segments, dtype=np.float64).reshape(-1, 4)
     labels = cluster_line_families(seg)

@@ -64,10 +64,8 @@ def estimate_frame_alignment(
     Raises:
         HomographyError: If too few features are matched or the RANSAC fit has fewer
             than ``min_inliers`` inliers.
+        ValueError: If ``feature`` is not ``"sift"``, ``"akaze"``, or ``"orb"``.
     """
-    # TODO(B): cv2.SIFT_create / cv2.ORB_create / cv2.AKAZE_create; BFMatcher with kNN;
-    #   ratio test; cv2.findHomography(RANSAC). Optionally refine with
-    #   cv2.findTransformECC.
     gray_previous = cv2.cvtColor(frame_previous, cv2.COLOR_BGR2GRAY)
     gray_current = cv2.cvtColor(frame_current, cv2.COLOR_BGR2GRAY)
     # Detection mask: 255 on background pixels, 0 inside the excluded boxes.
@@ -83,9 +81,11 @@ def estimate_frame_alignment(
     elif feature == "akaze":
         detector = cv2.AKAZE_create()
         norm = cv2.NORM_HAMMING
-    else:
+    elif feature == "orb":
         detector = cv2.ORB_create(nfeatures=2000)
         norm = cv2.NORM_HAMMING
+    else:
+        raise ValueError(f"Unsupported feature detector: {feature!r}")
     keypoints_previous, descriptors_previous = detector.detectAndCompute(
         gray_previous, mask
     )

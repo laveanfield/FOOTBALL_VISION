@@ -9,23 +9,36 @@ from football_vision.config import PitchConfig
 from football_vision.datatypes import Frame, Mask
 from football_vision.preprocessing.frames import convert_color
 
-# The mask is eroded by this many pixels so that the grass/stand boundary itself
-# is not reported as a pitch line.
-_MASK_ERODE_PX = 5
+# Erosion kernel size; a 5 x 5 kernel erodes the boundary by 2 px on each side so the
+# grass/stand boundary itself is not reported as a pitch line.
+_MASK_ERODE_KERNEL = 5
 # Floor for the top-hat threshold; Otsu alone would turn noise into lines in a
 # frame without any line.
 _MIN_TOPHAT_LEVEL = 20
+
+
+def _check_mask_shape(image: np.ndarray, mask: Mask | None) -> None:
+    """Validates that an optional mask matches the image spatial dimensions.
+
+    Args:
+        image: Target 2D image array.
+        mask: Optional 2D mask array.
+
+    Raises:
+        ValueError: If ``mask`` is given and its shape differs from ``image``.
+    """
+    if mask is not None and mask.shape != image.shape:
+        raise ValueError(
+            f"mask shape {mask.shape} does not match image shape {image.shape}"
+        )
 
 
 def _restrict_to_mask(binary: Mask, mask: Mask | None) -> Mask:
     """Keeps only the pixels of ``binary`` inside the eroded pitch mask."""
     if mask is None:
         return binary
-    if mask.shape != binary.shape:
-        raise ValueError(
-            f"mask shape {mask.shape} does not match image shape {binary.shape}"
-        )
-    kernel = np.ones((_MASK_ERODE_PX, _MASK_ERODE_PX), dtype=np.uint8)
+    _check_mask_shape(binary, mask)
+    kernel = np.ones((_MASK_ERODE_KERNEL, _MASK_ERODE_KERNEL), dtype=np.uint8)
     return np.asarray(cv2.bitwise_and(binary, cv2.erode(mask, kernel)), dtype=np.uint8)
 
 
@@ -53,8 +66,7 @@ def detect_edges_canny(
     Returns:
         ``uint8`` edge map of shape ``(H, W)`` with values 0 or 255.
     """
-    # TODO(A): cv2.GaussianBlur -> cv2.Canny -> bitwise_and with the eroded mask
-    #   (erode so the grass/stand boundary is not reported as a pitch line).
+    _check_mask_shape(gray, mask)
     smoothed = cv2.GaussianBlur(gray, (0, 0), blur_sigma) if blur_sigma > 0 else gray
     edges = np.asarray(cv2.Canny(smoothed, low, high), dtype=np.uint8)
     return _restrict_to_mask(edges, mask)
@@ -83,7 +95,7 @@ def extract_white_lines_tophat(
     Returns:
         ``uint8`` binary map of line pixels with values 0 or 255.
     """
-    # TODO(A): cv2.morphologyEx(MORPH_TOPHAT) -> Otsu or adaptive threshold -> mask.
+    _check_mask_shape(gray, mask)
     size = max(3, int(kernel_size))
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
     tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)

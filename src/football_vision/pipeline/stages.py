@@ -70,6 +70,7 @@ from football_vision.homography.quality import (
     check_homography_validity,
     line_overlay_score,
 )
+from football_vision.homography.smoothing import smooth_homography_sequence
 from football_vision.pitch.edges import extract_edges
 from football_vision.pitch.hough import (
     cluster_line_families,
@@ -344,6 +345,7 @@ class HomographyStage(Stage):
         frame: np.ndarray,
         first_frame_id: int,
         template: PitchTemplate,
+        mask: Mask | None = None,
     ) -> np.ndarray:
         """Estimates a keyframe homography from clicked landmarks or automatically."""
         cfg = self.ctx.cfg
@@ -352,7 +354,7 @@ class HomographyStage(Stage):
             return homography_from_landmark_dict(
                 landmarks, template, cfg.homography.ransac_threshold_px
             )[0]
-        edges = extract_edges(frame, None, cfg.pitch)
+        edges = extract_edges(frame, mask, cfg.pitch)
         segments = merge_collinear_segments(detect_line_segments(edges, cfg.pitch))
         return estimate_keyframe_homography_auto(frame, segments, template)
 
@@ -360,19 +362,23 @@ class HomographyStage(Stage):
         self, frame_ids: list[int], shots: list[tuple[int, int]]
     ) -> HomographySequence:
         """Moving camera: anchor at shot starts, chain frame-to-frame alignments."""
-        cfg = self.ctx.cfg
+        cfg, store = self.ctx.cfg, self.ctx.store
         hcfg = cfg.homography
         template = PitchTemplate()
         shot_starts = {first for first, _ in shots}
+        mask_dir = store.path(PITCH_MASK) if store.exists(PITCH_MASK) else None
         size = cfg.video.size
         matrices: list[np.ndarray] = []
         rows: list[dict[str, float]] = []
         previous_frame, h_previous, since_anchor = None, None, 0
         with _open_video(cfg) as reader:
             for frame_id, frame in reader:
+                mask = _load_mask(mask_dir, frame_id)
                 n_inliers = 0
                 if h_previous is None or frame_id in shot_starts:
-                    h_current = self._anchor(frame_id, frame, frame_ids[0], template)
+                    h_current = self._anchor(
+                        frame_id, frame, frame_ids[0], template, mask
+                    )
                     since_anchor = 0
                 else:
                     g_current, n_inliers = estimate_frame_alignment(
@@ -386,13 +392,15 @@ class HomographyStage(Stage):
                     )
                     h_current = propagate_homography(h_previous, g_current)
                     since_anchor += 1
-                edges = extract_edges(frame, None, cfg.pitch)
+                edges = extract_edges(frame, mask, cfg.pitch)
                 score = line_overlay_score(edges, h_current, template)
                 periodic = (
                     hcfg.reanchor_every_n > 0 and since_anchor >= hcfg.reanchor_every_n
                 )
                 if score < hcfg.reanchor_overlay_threshold or periodic:
-                    h_current = self._anchor(frame_id, frame, frame_ids[0], template)
+                    h_current = self._anchor(
+                        frame_id, frame, frame_ids[0], template, mask
+                    )
                     score, since_anchor = (
                         line_overlay_score(edges, h_current, template),
                         0,
@@ -410,9 +418,20 @@ class HomographyStage(Stage):
                     }
                 )
                 previous_frame, h_previous = frame, h_current
-        # TODO(B): smooth the sequence per shot with
-        #   homography.smoothing.smooth_homography_sequence.
-        return HomographySequence(np.stack(matrices), pd.DataFrame(rows))
+        stacked = np.stack(matrices)
+        if hcfg.smoothing_window >= 3:
+            reference = np.array(
+                [[25.0, 15.0], [80.0, 15.0], [80.0, 53.0], [25.0, 53.0]]
+            )
+            frame_arr = np.asarray(frame_ids)
+            shot_ranges = shots or [(frame_ids[0], frame_ids[-1])]
+            for first, last in shot_ranges:
+                in_shot = (frame_arr >= first) & (frame_arr <= last)
+                if np.any(in_shot):
+                    stacked[in_shot] = smooth_homography_sequence(
+                        stacked[in_shot], reference, hcfg.smoothing_window
+                    )
+        return HomographySequence(stacked, pd.DataFrame(rows))
 
 
 # ---------------------------------------------------------------------- P4 stage

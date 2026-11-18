@@ -54,8 +54,6 @@ def histogram_distance(
     Returns:
         The chi-square distance between the two histograms.
     """
-    # TODO(A): convert both frames to HSV, build 3D histograms with cv2.calcHist,
-    #   normalize, and evaluate the chi-square formula above.
     return _chi_square(
         _normalized_hsv_histogram(frame_a, bins),
         _normalized_hsv_histogram(frame_b, bins),
@@ -63,21 +61,27 @@ def histogram_distance(
 
 
 def _drop_flashes(
-    cuts: list[tuple[int, int, int]],
-) -> list[tuple[int, int, int]]:
-    """Removes pairs of cuts that are closer than ``_FLASH_MAX_GAP_SAMPLES``.
+    cuts: list[tuple[int, int, int, np.ndarray, np.ndarray]],
+    threshold: float,
+) -> list[tuple[int, int]]:
+    """Removes pairs of cuts closer than ``_FLASH_MAX_GAP_SAMPLES`` if content matches.
 
-    A camera flash makes the image jump away and back, so it produces two cuts in
-    quick succession, and the content before and after belongs to the same shot.
-    Cuts are ``(last_id_of_old_shot, first_id_of_new_shot, sample_index)``.
+    A camera flash makes the image jump away and back, producing two cuts in quick
+    succession where the frame before the first cut and the frame after the second
+    cut belong to the same shot (their histogram distance does not exceed
+    ``threshold``). A short insert between two different shots is preserved.
     """
-    kept: list[tuple[int, int, int]] = []
+    kept: list[tuple[int, int]] = []
     i = 0
     while i < len(cuts):
-        if i + 1 < len(cuts) and cuts[i + 1][2] - cuts[i][2] < _FLASH_MAX_GAP_SAMPLES:
+        if (
+            i + 1 < len(cuts)
+            and cuts[i + 1][2] - cuts[i][2] < _FLASH_MAX_GAP_SAMPLES
+            and _chi_square(cuts[i][3], cuts[i + 1][4]) <= threshold
+        ):
             i += 2
             continue
-        kept.append(cuts[i])
+        kept.append((cuts[i][0], cuts[i][1]))
         i += 1
     return kept
 
@@ -88,12 +92,12 @@ def detect_shot_boundaries(
     """Splits a frame sequence into shots.
 
     A cut is declared where the histogram distance between consecutive frames
-    exceeds ``threshold``. Consecutive cuts closer than a few frames can be merged
-    to ignore flashes: here, two cuts less than five processed frames apart are both
-    discarded.
+    exceeds ``threshold``. Two cuts less than five processed frames apart are
+    discarded as a flash only when the frames before and after the interruption have
+    histogram distance at most ``threshold``.
 
-    Only the histogram of the previous frame is kept, so the iterable can be a
-    generator over a long video.
+    Only the histogram of the previous frame (and cut-boundary histograms) is kept,
+    so the iterable can be a generator over a long video.
 
     Args:
         frames: Iterable of ``(frame_id, frame)`` pairs in temporal order.
@@ -103,24 +107,23 @@ def detect_shot_boundaries(
         Inclusive ``(first_frame_id, last_frame_id)`` ranges, one per shot.
         The list is empty when ``frames`` is empty.
     """
-    # TODO(A): iterate over consecutive frame pairs, call histogram_distance, and
-    #   collect shot ranges. Plot the distance curve to choose the threshold.
+    # TODO(A): calibrate threshold by plotting the distance curve on real clips.
     first_id: int | None = None
     previous_id = 0
     previous_hist: np.ndarray | None = None
-    cuts: list[tuple[int, int, int]] = []
+    cuts: list[tuple[int, int, int, np.ndarray, np.ndarray]] = []
     for sample_index, (frame_id, frame) in enumerate(frames):
         hist = _normalized_hsv_histogram(frame, _DEFAULT_BINS)
         if previous_hist is None:
             first_id = frame_id
         elif _chi_square(previous_hist, hist) > threshold:
-            cuts.append((previous_id, frame_id, sample_index))
+            cuts.append((previous_id, frame_id, sample_index, previous_hist, hist))
         previous_hist, previous_id = hist, frame_id
     if first_id is None:
         return []
     shots: list[tuple[int, int]] = []
     start = first_id
-    for last_of_shot, first_of_next, _ in _drop_flashes(cuts):
+    for last_of_shot, first_of_next in _drop_flashes(cuts, threshold):
         shots.append((int(start), int(last_of_shot)))
         start = first_of_next
     shots.append((int(start), int(previous_id)))

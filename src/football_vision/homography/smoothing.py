@@ -8,7 +8,7 @@ import numpy.typing as npt
 from football_vision.datatypes import Points2D
 from football_vision.errors import HomographyError
 from football_vision.homography.dlt import estimate_homography_dlt
-from football_vision.homography.geometry import apply_homography
+from football_vision.homography.geometry import apply_homography, invert_homography
 
 
 def smooth_homography_sequence(
@@ -41,7 +41,6 @@ def smooth_homography_sequence(
         Array of shape ``(T, 3, 3)`` with the smoothed homographies. A frame whose
         smoothed correspondences are degenerate keeps its original matrix.
     """
-    # TODO(B): see ablation A3 (no smoothing vs. matrix entries vs. reference points).
     mats = np.asarray(matrices, dtype=np.float64)
     reference = np.asarray(reference_points_pitch, dtype=np.float64).reshape(-1, 2)
     length = len(mats)  # number of frames T
@@ -50,7 +49,14 @@ def smooth_homography_sequence(
         return mats.copy()
     order = min(polyorder, size - 1)  # polynomial order must be below the window
     # Trajectories of the reference points in the image, shape (T, 4, 2).
-    trajectory = np.stack([apply_homography(np.linalg.inv(m), reference) for m in mats])
+    try:
+        trajectory = np.stack(
+            [apply_homography(invert_homography(m), reference) for m in mats]
+        )
+    except HomographyError:
+        return mats.copy()
+    if not np.isfinite(trajectory).all():
+        return mats.copy()
     half = size // 2
     offsets = np.arange(-half, half + 1, dtype=np.float64)  # frame offsets in window
     design = np.vander(offsets, order + 1, increasing=True)  # (size, order + 1)

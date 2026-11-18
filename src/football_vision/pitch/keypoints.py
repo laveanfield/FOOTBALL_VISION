@@ -33,7 +33,6 @@ def find_line_intersections(
         Array of shape ``(K, 2)`` with candidate keypoints in pixels. It has shape
         ``(0, 2)`` when no pair intersects inside the frame.
     """
-    # TODO(A): double loop (or broadcasting) over pairs, skip parallel pairs (None).
     width, height = frame_size
     segments_a = np.asarray(lines_a, dtype=np.float64).reshape(-1, 4)
     segments_b = np.asarray(lines_b, dtype=np.float64).reshape(-1, 4)
@@ -72,8 +71,6 @@ def fit_ellipse_to_edges(
     Raises:
         ValueError: If fewer than five points are given.
     """
-    # TODO(A): select the connected component near the pitch center, then
-    #   call cv2.fitEllipse.
     points = np.asarray(edge_points, dtype=np.float32).reshape(-1, 2)
     if len(points) < _MIN_ELLIPSE_POINTS:
         raise ValueError(
