@@ -42,6 +42,18 @@ def speed_sanity_report(
     }
 
 
+def _valid_pitch_tracks(pitch_xy: pd.DataFrame) -> pd.DataFrame:
+    """Returns finite, valid rows of ``pitch_xy`` sorted by track and frame."""
+    if len(pitch_xy) == 0:
+        return pitch_xy
+    finite = np.isfinite(pitch_xy["X"].to_numpy(dtype=np.float64)) & np.isfinite(
+        pitch_xy["Y"].to_numpy(dtype=np.float64)
+    )
+    return pitch_xy[(pitch_xy["valid"] == 1) & finite].sort_values(
+        ["track_id", "frame_id"]
+    )
+
+
 def per_sample_speeds(
     pitch_xy: pd.DataFrame, fps: float, max_gap_frames: int
 ) -> npt.NDArray[np.float64]:
@@ -58,7 +70,7 @@ def per_sample_speeds(
     Returns:
         Speeds in meters per second, concatenated over all segments.
     """
-    valid = pitch_xy[pitch_xy["valid"] == 1].sort_values(["track_id", "frame_id"])
+    valid = _valid_pitch_tracks(pitch_xy)
     speeds: list[npt.NDArray[np.float64]] = []
     for _, group in valid.groupby("track_id"):
         frame_ids = group["frame_id"].to_numpy(dtype=np.int64)
@@ -95,7 +107,7 @@ def stationary_distance_per_minute(
         Mean distance in meters per 60 s of visibility over the quasi-static
         tracks, or NaN if the clip has none.
     """
-    valid = pitch_xy[pitch_xy["valid"] == 1].sort_values(["track_id", "frame_id"])
+    valid = _valid_pitch_tracks(pitch_xy)
     rates = []
     for _, group in valid.groupby("track_id"):
         if len(group) < min_samples:

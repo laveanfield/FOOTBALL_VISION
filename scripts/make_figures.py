@@ -27,6 +27,7 @@ from football_vision.artifacts import (
     HOMOGRAPHY_QUALITY,
     OUTPUTS,
     PITCH_LINES,
+    PITCH_MASK,
     PITCH_XY,
     ArtifactStore,
 )
@@ -75,7 +76,12 @@ def pipeline_steps_figure(
     if not frames:
         raise FileNotFoundError(f"frame {frame_id} of {meta.source}")
     frame = preprocess_frame(frames[0], cfg.preprocess)
-    edges = extract_edges(frame, None, cfg.pitch)
+    mask = None
+    if store.exists(PITCH_MASK):
+        mask_path = store.path(PITCH_MASK) / f"{frame_id:06d}.png"
+        if mask_path.is_file():
+            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    edges = extract_edges(frame, mask, cfg.pitch)
     lines = store.read_table(PITCH_LINES)
     lines = lines[lines["frame_id"] == frame_id]
     segments = lines[["x1", "y1", "x2", "y2"]].to_numpy(dtype=np.float64)
@@ -142,7 +148,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="run without trajectory smoothing, overlaid on the speed histogram (A7)",
     )
     args = parser.parse_args(argv)
-    cfg = load_config(args.config or None)
+    run_config = args.run_dir / "config.yaml"
+    config_paths = args.config or ([run_config] if run_config.is_file() else None)
+    cfg = load_config(config_paths)
     store = ArtifactStore(args.run_dir)
     out_dir = ensure_dir(args.output_dir)
     analytics_dir = store.path(ANALYTICS)
