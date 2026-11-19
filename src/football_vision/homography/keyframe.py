@@ -10,6 +10,10 @@ import numpy as np
 from football_vision.constants import GOAL_AREA_DEPTH_M, PENALTY_AREA_DEPTH_M
 from football_vision.datatypes import Frame, Homography, Points2D
 from football_vision.errors import HomographyError
+from football_vision.homography.dlt import (
+    estimate_homography_dlt,
+    reprojection_error,
+)
 from football_vision.homography.geometry import (
     apply_homography,
     invert_homography,
@@ -55,6 +59,13 @@ def homography_from_landmarks(
         raise HomographyError(
             f"Need at least {MIN_CORRESPONDENCES} matching landmarks, got {len(img)}"
         )
+    try:
+        h_dlt = estimate_homography_dlt(img, pit)
+        err_m = reprojection_error(h_dlt, img, pit)
+        if np.isfinite(err_m).all() and float(err_m.max()) <= 2.0:
+            return h_dlt, len(img)
+    except HomographyError:
+        pass
     h_pitch_to_image, mask = cv2.findHomography(
         pit, img, cv2.RANSAC, ransac_threshold_px
     )

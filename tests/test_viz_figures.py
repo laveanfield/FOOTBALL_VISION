@@ -23,6 +23,8 @@ from football_vision.artifacts import (
     PITCH_MASK,
     PITCH_XY,
     TEAM_LABELS,
+    TRACK_COLUMNS,
+    TRACKS,
     ArtifactStore,
     HomographySequence,
     VideoMeta,
@@ -461,3 +463,54 @@ def test_make_figures_auto_loads_run_config_and_uses_pitch_mask(
         == 0
     )
     assert seen_limits == [9.0]
+
+
+def test_tracking_metrics_filters_mot_ground_truth_to_processed_window(
+    tmp_path: Path,
+) -> None:
+    """Checks tracking_metrics ignores MOT GT rows outside [start_frame, end_frame)."""
+    ra = _load_script("run_ablation")
+    run_dir = tmp_path / "run_window"
+    store = ArtifactStore(run_dir)
+    store.write_meta(
+        VideoMeta(
+            source="clip.mp4",
+            fps=25.0,
+            width=1280,
+            height=720,
+            n_frames=20,
+            shots=[(0, 19)],
+        )
+    )
+    tracks = pd.DataFrame(
+        [
+            {
+                "frame_id": fid,
+                "track_id": 1,
+                "x1": 100.0,
+                "y1": 200.0,
+                "x2": 140.0,
+                "y2": 300.0,
+                "score": 0.9,
+                "cls": 0,
+                "team": -1,
+                "role": "player",
+            }
+            for fid in range(10, 15)
+        ],
+        columns=list(TRACK_COLUMNS),
+    )
+    store.write_table(TRACKS, tracks)
+
+    # MOT file is 1-based: frames 1..5 are outside [10, 15), 11..15 match 10..14.
+    mot_lines = [f"{fid},1,100,200,40,100,1,1,1" for fid in range(1, 6)]
+    mot_lines += [f"{fid},1,100,200,40,100,1,1,1" for fid in range(11, 16)]
+    mot_file = tmp_path / "mot.txt"
+    mot_file.write_text("\n".join(mot_lines) + "\n", encoding="utf-8")
+
+    cfg = PipelineConfig()
+    cfg.video.start_frame = 10
+    cfg.video.end_frame = 15
+    res = ra.tracking_metrics(store, cfg, ra.GroundTruthFiles(mot=mot_file))
+    assert res["mota"] == pytest.approx(1.0)
+    assert res["idf1"] == pytest.approx(1.0)

@@ -83,3 +83,39 @@ def test_reprojection_error_in_target_units() -> None:
         identity, np.array([[0.0, 0.0], [3.0, 4.0]]), np.array([[0.0, 0.0], [0.0, 0.0]])
     )
     np.testing.assert_allclose(errors, [0.0, 5.0])
+
+
+def test_landmark_homography_uses_dlt_for_noisy_clicks_and_ransac_for_outliers() -> (
+    None
+):
+    """Uses all points via DLT under ~5 px click jitter and RANSAC on gross outliers."""
+    template = PitchTemplate()
+    pitch = template.landmark_array(NAMES)
+    clean_img = apply_homography(H_PITCH_TO_IMAGE, pitch)
+    jitter = np.array(
+        [
+            [4.0, -3.0],
+            [-5.0, 2.0],
+            [3.0, 4.0],
+            [-4.0, -4.0],
+            [5.0, -1.0],
+            [-2.0, 5.0],
+            [3.0, -3.0],
+        ]
+    )
+    noisy_img = clean_img + jitter
+    noisy_lm = {n: tuple(p) for n, p in zip(NAMES, noisy_img, strict=True)}
+    h_dlt, n_inliers = homography_from_landmark_dict(
+        noisy_lm, template, ransac_threshold_px=3.0
+    )
+    assert n_inliers == len(NAMES)
+    assert reprojection_error(h_dlt, noisy_img, pitch).max() < 1.5
+
+    corrupted_img = noisy_img.copy()
+    corrupted_img[0] += [200.0, 200.0]
+    corrupt_lm = {n: tuple(p) for n, p in zip(NAMES, corrupted_img, strict=True)}
+    h_ransac, n_inliers_corrupt = homography_from_landmark_dict(
+        corrupt_lm, template, ransac_threshold_px=12.0
+    )
+    assert n_inliers_corrupt < len(NAMES)
+    assert reprojection_error(h_ransac, corrupted_img[1:], pitch[1:]).max() < 2.0

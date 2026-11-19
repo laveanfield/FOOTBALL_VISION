@@ -332,3 +332,28 @@ def test_ablation_runner_copies_upstream_artifacts_and_collects_metrics(
     assert table["n_frames"].tolist() == [float(N_FRAMES)] * 2
     assert (base_cfg.run_dir.parent / "test_T1_gaussian" / META).is_file()
     assert (base_cfg.run_dir.parent / "ablation_T1.csv").is_file()
+
+
+def test_fixed_homography_stage_marks_degenerate_landmarks_invalid(
+    base_cfg: PipelineConfig, tmp_path: Path
+) -> None:
+    """Checks that HomographyStage records invalid flag for degenerate landmarks."""
+    bad_landmarks = {
+        "left_pa_outer_bottom": (434.0, 499.0),
+        "left_ga_outer_top": (720.0, 245.0),
+        "left_ga_goalline_top": (752.0, 185.0),
+        "left_penalty_spot": (699.0, 316.0),
+    }
+    landmarks_path = save_landmarks_json(bad_landmarks, tmp_path / "bad_lm.json")
+    cfg = apply_overrides(
+        base_cfg,
+        {
+            "run_name": "bad_hom",
+            "homography.landmarks_path": str(landmarks_path),
+        },
+    )
+    runner = PipelineRunner(cfg)
+    runner.run(["preprocess", "homography"])
+    sequence = runner.ctx.store.read_homographies()
+    assert len(sequence.matrices) == N_FRAMES
+    assert not sequence.is_valid(0)

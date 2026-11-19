@@ -240,11 +240,14 @@ def detection_metrics(
     return out
 
 
-def tracking_metrics(store: ArtifactStore, gt: GroundTruthFiles) -> dict[str, float]:
+def tracking_metrics(
+    store: ArtifactStore, cfg: PipelineConfig, gt: GroundTruthFiles
+) -> dict[str, float]:
     """Computes identity metrics against the MOT ground truth.
 
     Args:
         store: Artifact store of the variant.
+        cfg: Configuration of the variant.
         gt: Ground-truth files.
 
     Returns:
@@ -253,7 +256,25 @@ def tracking_metrics(store: ArtifactStore, gt: GroundTruthFiles) -> dict[str, fl
     keys = ("idf1", "mota", "hota", "id_switches")
     if gt.mot is None:
         return dict.fromkeys(keys, NAN)
-    result = evaluate_tracking(store.read_table(TRACKS), load_mot_ground_truth(gt.mot))
+    truth = load_mot_ground_truth(gt.mot)
+    if store.exists(META):
+        n_total = store.read_meta().n_frames
+        stop = (
+            min(n_total, cfg.video.end_frame)
+            if cfg.video.end_frame is not None
+            else n_total
+        )
+        processed = set(range(cfg.video.start_frame, stop, max(1, cfg.video.stride)))
+        truth = truth[truth["frame_id"].isin(processed)]
+    elif cfg.video.start_frame > 0 or cfg.video.end_frame is not None:
+        stop = (
+            cfg.video.end_frame
+            if cfg.video.end_frame is not None
+            else (int(truth["frame_id"].max()) + 1 if len(truth) else 0)
+        )
+        processed = set(range(cfg.video.start_frame, stop, max(1, cfg.video.stride)))
+        truth = truth[truth["frame_id"].isin(processed)]
+    result = evaluate_tracking(store.read_table(TRACKS), truth)
     return {k: float(result.get(k, NAN)) for k in keys}
 
 
@@ -343,7 +364,7 @@ def evaluate_variant(
             store, cfg, gt, float(timings.get("detect", {}).get("seconds", 0.0))
         )
     elif ablation_id in ("A5", "A6"):
-        metrics |= tracking_metrics(store, gt)
+        metrics |= tracking_metrics(store, cfg, gt)
     elif ablation_id == "A7":
         metrics |= analytics_metrics(store, cfg)
     elif ablation_id == "A8":

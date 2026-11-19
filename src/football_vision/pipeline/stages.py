@@ -326,10 +326,13 @@ class HomographyStage(Stage):
             np.array([landmarks[n] for n in names]),
             template.landmark_array(names),
         )
+        is_valid = int(
+            check_homography_validity(matrix, self.ctx.cfg.video.size, template)
+        )
         quality = pd.DataFrame(
             {
                 "frame_id": frame_ids,
-                "valid": 1,
+                "valid": is_valid,
                 "n_inliers": n_inliers,
                 "reproj_err_m": float(errors.mean()),
                 "overlay_score": np.nan,
@@ -381,16 +384,24 @@ class HomographyStage(Stage):
                     )
                     since_anchor = 0
                 else:
-                    g_current, n_inliers = estimate_frame_alignment(
-                        previous_frame,
-                        frame,
-                        None,
-                        hcfg.feature,
-                        hcfg.ratio_test,
-                        hcfg.ransac_threshold_px,
-                        hcfg.min_inliers,
-                    )
-                    h_current = propagate_homography(h_previous, g_current)
+                    try:
+                        g_current, n_inliers = estimate_frame_alignment(
+                            previous_frame,
+                            frame,
+                            None,
+                            hcfg.feature,
+                            hcfg.ratio_test,
+                            hcfg.ransac_threshold_px,
+                            hcfg.min_inliers,
+                        )
+                        h_current = propagate_homography(h_previous, g_current)
+                    except HomographyError:
+                        self.ctx.logger.warning(
+                            "Frame alignment failed at frame %d; keeping previous H",
+                            frame_id,
+                        )
+                        h_current = h_previous
+                        n_inliers = 0
                     since_anchor += 1
                 edges = extract_edges(frame, mask, cfg.pitch)
                 score = line_overlay_score(edges, h_current, template)
@@ -399,13 +410,23 @@ class HomographyStage(Stage):
                 )
                 if score < hcfg.reanchor_overlay_threshold or periodic:
                     try:
-                        h_current = self._anchor(
+                        h_cand = self._anchor(
                             frame_id, frame, frame_ids[0], template, mask
                         )
-                        score, since_anchor = (
-                            line_overlay_score(edges, h_current, template),
-                            0,
-                        )
+                        cand_score = line_overlay_score(edges, h_cand, template)
+                        if (
+                            check_homography_validity(h_cand, size, template)
+                            and cand_score > score
+                        ):
+                            h_current, score, since_anchor = h_cand, cand_score, 0
+                        else:
+                            self.ctx.logger.warning(
+                                "Rejected re-anchor at frame %d "
+                                "(score %.3f <= %.3f); keeping propagated H",
+                                frame_id,
+                                cand_score,
+                                score,
+                            )
                     except HomographyError:
                         self.ctx.logger.warning(
                             "Re-anchor failed at frame %d; keeping propagated H",
