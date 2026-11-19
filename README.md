@@ -60,7 +60,7 @@ camera, C = detection, tracking and teams, D = analytics, visualization and inte
 | `preprocessing.shots`, `preprocessing.pitch_mask`, `pitch.edges/hough/keypoints` | Implemented (A), tested |
 | `homography.dlt`, `homography.ransac`, `keyframe`, `propagation`, `smoothing`, `quality` | Implemented (B), tested |
 | `detection.tiling`, `tracking` (Kalman, assignment, SORT, ByteTrack, stitching), `team.*`, `eval.detection`, `eval.tracking.evaluate_tracking` | Implemented (C), tested |
-| `viz.figures`, `viz.render.make_filmstrip` | **Stub (D)** |
+| `viz.figures`, `viz.render.make_filmstrip` | Implemented (D), tested |
 
 Find all open work with `grep -rn "TODO(" src`. Each stub raises `NotImplementedError`
 and documents its algorithm, arguments and result. Contract tests live in
