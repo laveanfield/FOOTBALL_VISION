@@ -56,7 +56,7 @@ from football_vision.detection.base import Detector
 from football_vision.detection.postprocess import filter_by_pitch_mask, filter_by_size
 from football_vision.detection.tiling import TiledDetector
 from football_vision.detection.yolo import YoloDetector
-from football_vision.errors import PipelineError
+from football_vision.errors import HomographyError, PipelineError
 from football_vision.homography.dlt import reprojection_error
 from football_vision.homography.keyframe import (
     estimate_keyframe_homography_auto,
@@ -398,13 +398,19 @@ class HomographyStage(Stage):
                     hcfg.reanchor_every_n > 0 and since_anchor >= hcfg.reanchor_every_n
                 )
                 if score < hcfg.reanchor_overlay_threshold or periodic:
-                    h_current = self._anchor(
-                        frame_id, frame, frame_ids[0], template, mask
-                    )
-                    score, since_anchor = (
-                        line_overlay_score(edges, h_current, template),
-                        0,
-                    )
+                    try:
+                        h_current = self._anchor(
+                            frame_id, frame, frame_ids[0], template, mask
+                        )
+                        score, since_anchor = (
+                            line_overlay_score(edges, h_current, template),
+                            0,
+                        )
+                    except HomographyError:
+                        self.ctx.logger.warning(
+                            "Re-anchor failed at frame %d; keeping propagated H",
+                            frame_id,
+                        )
                 matrices.append(h_current)
                 rows.append(
                     {

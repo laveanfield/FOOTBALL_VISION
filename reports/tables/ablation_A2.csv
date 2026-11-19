@@ -1,0 +1,4 @@
+variant,stage_seconds,valid_ratio,jitter_px,reproj_err_m_median,reproj_err_m_p95
+fixed,0.007,1.0,0.0,16.681435076988016,37.04736826939738
+propagate_no_reanchor,257.678,0.0,,,
+propagate_reanchor,290.805,0.8565853658536585,6690.636674457288,28.504080380511652,53.98295728705358
