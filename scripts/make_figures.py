@@ -27,6 +27,7 @@ from football_vision.artifacts import (
     HOMOGRAPHY_QUALITY,
     OUTPUTS,
     PITCH_LINES,
+    PITCH_MASK,
     PITCH_XY,
     ArtifactStore,
 )
@@ -47,12 +48,29 @@ from football_vision.viz.figures import (
 from football_vision.viz.render import make_filmstrip
 
 
+def resolve_config_paths(config: Sequence[str], run_dir: Path) -> list[Path] | None:
+    """Chooses the configuration that produced the run.
+
+    Args:
+        config: Paths given with ``--config``.
+        run_dir: Run directory; its ``config.yaml`` is written by the pipeline runner.
+
+    Returns:
+        The given paths, else the run's ``config.yaml``, else ``None`` (defaults).
+    """
+    if config:
+        return [Path(c) for c in config]
+    saved = Path(run_dir) / "config.yaml"
+    return [saved] if saved.exists() else None
+
+
 def pipeline_steps_figure(
     store: ArtifactStore, cfg: PipelineConfig, frame_id: int
 ) -> Figure:
     """Rebuilds the P2 intermediates of one frame and plots them.
 
-    Edges are recomputed with the configured settings; segments and their families
+    Edges are recomputed with the configured settings and the stored pitch mask (as
+    the ``pitch_lines`` stage does); segments and their families
     come from ``pitch_lines.csv``; keypoints are the intersections of the two line
     families.
 
@@ -75,7 +93,11 @@ def pipeline_steps_figure(
     if not frames:
         raise FileNotFoundError(f"frame {frame_id} of {meta.source}")
     frame = preprocess_frame(frames[0], cfg.preprocess)
-    edges = extract_edges(frame, None, cfg.pitch)
+    mask = None
+    if store.exists(PITCH_MASK):
+        mask_path = store.path(PITCH_MASK) / f"{frame_id:06d}.png"
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    edges = extract_edges(frame, mask, cfg.pitch)
     lines = store.read_table(PITCH_LINES)
     lines = lines[lines["frame_id"] == frame_id]
     segments = lines[["x1", "y1", "x2", "y2"]].to_numpy(dtype=np.float64)
@@ -131,7 +153,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate report figures.")
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("reports/figures"))
-    parser.add_argument("--config", "-c", action="append", default=[])
+    parser.add_argument(
+        "--config",
+        "-c",
+        action="append",
+        default=[],
+        help="defaults to <run-dir>/config.yaml",
+    )
     parser.add_argument(
         "--frame-id", type=int, default=None, help="frame for the pipeline figure"
     )
@@ -142,8 +170,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="run without trajectory smoothing, overlaid on the speed histogram (A7)",
     )
     args = parser.parse_args(argv)
-    cfg = load_config(args.config or None)
     store = ArtifactStore(args.run_dir)
+    cfg = load_config(resolve_config_paths(args.config, args.run_dir))
     out_dir = ensure_dir(args.output_dir)
     analytics_dir = store.path(ANALYTICS)
     max_gap = cfg.analytics.max_gap_frames * cfg.video.stride

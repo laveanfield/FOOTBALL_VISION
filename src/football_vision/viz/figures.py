@@ -127,7 +127,7 @@ def plot_team_shape(
     data = shape_series.sort_values("frame_id")
     x = data["frame_id"].to_numpy(dtype=np.float64)
     x_label = "frame"
-    if fps:
+    if fps is not None and fps > 0:
         x = x / fps
         x_label = "time (s)"
     fig = Figure(figsize=(10, 6), layout="constrained")
@@ -179,7 +179,10 @@ def plot_speed_distribution(
     fig = Figure(figsize=(9, 5), layout="constrained")
     ax = fig.add_subplot()
     for sample, label in samples:
-        outliers = float((sample > max_speed_mps).mean()) if len(sample) else np.nan
+        if len(sample) == 0:
+            ax.plot([], [], label=f"{label} (n=0, no finite speed)")
+            continue
+        outliers = float((sample > max_speed_mps).mean())
         ax.hist(
             sample,
             bins=bins,

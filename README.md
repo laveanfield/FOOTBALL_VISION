@@ -60,7 +60,7 @@ camera, C = detection, tracking and teams, D = analytics, visualization and inte
 | `preprocessing.shots`, `preprocessing.pitch_mask`, `pitch.edges/hough/keypoints` | **Stub (A)** |
 | `homography.dlt`, `homography.ransac` (estimator), `keyframe` (auto), `propagation` (alignment), `smoothing`, `quality` | **Stub (B)**; DLT/RANSAC have contract tests |
 | `detection.tiling`, `tracking` (Kalman, assignment, SORT, ByteTrack, stitching), `team.*`, `eval.detection`, `eval.tracking.evaluate_tracking` | **Stub (C)**; Kalman/assignment have contract tests |
-| `viz.figures`, `viz.render.make_filmstrip` | **Stub (D)** |
+| `viz.figures`, `viz.render.make_filmstrip`, `eval.speed` sample helpers, `scripts/make_figures.py`, `scripts/run_ablation.py` metrics | Implemented (D), tested |
 
 Find all open work with `grep -rn "TODO(" src`. Each stub raises `NotImplementedError`
 and documents its algorithm, arguments and result. Contract tests live in

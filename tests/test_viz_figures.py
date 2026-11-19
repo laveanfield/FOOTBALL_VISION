@@ -159,3 +159,44 @@ def test_stationary_distance_grows_with_noise() -> None:
     assert clean == pytest.approx(0.0)
     assert noisy > 100.0
     assert np.isnan(stationary_distance_per_minute(_pitch_xy({1: runner}), 25.0, 5))
+
+
+def test_speed_distribution_handles_empty_input_without_warning() -> None:
+    """D6a: an empty or all-NaN sample neither warns nor prints 'nan%'."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        fig = plot_speed_distribution(np.array([np.nan, np.nan]))
+    labels = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+    assert "n=0" in labels[0]
+    assert not any("nan" in label for label in labels)
+
+
+def test_team_shape_ignores_non_positive_fps() -> None:
+    """D6b: fps=0 keeps the frame axis instead of dividing by zero."""
+    shape = pd.DataFrame(
+        {
+            "frame_id": [0, 25],
+            "length_m": [30.0, 31.0],
+            "width_m": [40.0, 41.0],
+            "hull_area_m2": [900.0, 950.0],
+        }
+    )
+    fig = plot_team_shape(shape, fps=0.0)
+    assert fig.axes[1].get_xlabel() == "frame"
+    np.testing.assert_allclose(fig.axes[0].get_lines()[0].get_xdata(), [0, 25])
+
+
+def test_speed_helpers_skip_non_finite_positions() -> None:
+    """D6c: NaN coordinates are dropped instead of poisoning speeds and medians."""
+    walk = np.stack([np.arange(10) * 0.2, np.zeros(10)], axis=1)
+    walk[4] = np.nan
+    table = _pitch_xy({1: walk})
+    speeds = per_sample_speeds(table, fps=25.0, max_gap_frames=5)
+    assert np.isfinite(speeds).all()
+    still = np.tile([30.0, 30.0], (60, 1))
+    still[10] = np.nan
+    assert stationary_distance_per_minute(
+        _pitch_xy({1: still}), 25.0, 5
+    ) == pytest.approx(0.0)
