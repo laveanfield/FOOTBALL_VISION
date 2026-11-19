@@ -165,8 +165,9 @@ def evaluate_detections(
         results[f"ap50_cls{cls_id}"] = ap50
         results[f"ap50_95_cls{cls_id}"] = ap50_95
 
-        ap50_list.append(ap50)
-        ap50_95_list.append(ap50_95)
+        if n_gt > 0:
+            ap50_list.append(ap50)
+            ap50_95_list.append(ap50_95)
         total_tp += tp_req
         total_fp += fp_req
         total_gt += n_gt
@@ -177,7 +178,7 @@ def evaluate_detections(
     return {
         "precision": overall_prec,
         "recall": overall_rec,
-        "map50": float(np.mean(ap50_list)),
-        "map50_95": float(np.mean(ap50_95_list)),
+        "map50": float(np.mean(ap50_list)) if ap50_list else 0.0,
+        "map50_95": float(np.mean(ap50_95_list)) if ap50_95_list else 0.0,
         **results,
     }

@@ -59,7 +59,7 @@ camera, C = detection, tracking and teams, D = analytics, visualization and inte
 | OpenCV baselines: `homography.keyframe.homography_from_landmarks`, `propagate_homography` | Implemented, tested |
 | `preprocessing.shots`, `preprocessing.pitch_mask`, `pitch.edges/hough/keypoints` | **Stub (A)** |
 | `homography.dlt`, `homography.ransac` (estimator), `keyframe` (auto), `propagation` (alignment), `smoothing`, `quality` | **Stub (B)**; DLT/RANSAC have contract tests |
-| `detection.tiling`, `tracking` (Kalman, assignment, SORT, ByteTrack, stitching), `team.*`, `eval.detection`, `eval.tracking.evaluate_tracking` | **Stub (C)**; Kalman/assignment have contract tests |
+| `detection.tiling`, `tracking` (Kalman, assignment, SORT, ByteTrack, stitching), `team.*`, `eval.detection`, `eval.tracking.evaluate_tracking` | Implemented (C), tested |
 | `viz.figures`, `viz.render.make_filmstrip` | **Stub (D)** |
 
 Find all open work with `grep -rn "TODO(" src`. Each stub raises `NotImplementedError`

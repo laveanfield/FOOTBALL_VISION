@@ -228,3 +228,29 @@ def test_assign_possession_detect_passes_and_network() -> None:
         {"from_track": 1, "to_track": 2, "count": 1}
     ]
     assert build_passing_network(passes, team=2).empty
+
+
+def test_select_ball_track_scales_jump_gate_across_short_gap() -> None:
+    """Allows steady ball speed across an occluded multi-frame gap."""
+    dets = pd.DataFrame(
+        [
+            {"frame_id": 0, "x": 100.0, "y": 100.0, "conf": 0.9, "cls": 32},
+            {"frame_id": 4, "x": 300.0, "y": 100.0, "conf": 0.9, "cls": 32},
+            {"frame_id": 5, "x": 350.0, "y": 100.0, "conf": 0.9, "cls": 32},
+        ]
+    )
+    ball = select_ball_track(dets, max_gap_frames=10, max_jump_px=150.0)
+    assert ball["frame_id"].tolist() == [0, 1, 2, 3, 4, 5]
+    assert ball["interpolated"].tolist() == [False, True, True, True, False, False]
+
+
+def test_detect_passes_resets_across_unknown_team_holder() -> None:
+    """Does not fabricate a same-team pass across an unknown-team ball holder."""
+    poss = pd.DataFrame(
+        [
+            {"frame_id": 0, "track_id": 1, "team": 0},
+            {"frame_id": 1, "track_id": 50, "team": TEAM_UNKNOWN},
+            {"frame_id": 2, "track_id": 2, "team": 0},
+        ]
+    )
+    assert detect_passes(poss).empty

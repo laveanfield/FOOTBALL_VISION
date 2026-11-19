@@ -243,3 +243,15 @@ def test_stitch_tracklets_bridges_chains_and_respects_gates() -> None:
 
     empty = df.iloc[0:0]
     assert len(stitch_tracklets(empty)) == 0
+
+
+def test_solve_assignment_clamps_finite_costs_above_gate() -> None:
+    """Rejects finite edges above max_cost before Hungarian global matching."""
+    cost = np.array([[0.49, 0.51], [0.51, 100.0]], dtype=np.float64)
+    matches, unmatched_rows, unmatched_cols = solve_assignment(cost, max_cost=0.5)
+    assert matches == [(0, 0)]
+    assert unmatched_rows == [1]
+    assert unmatched_cols == [1]
+
+    with pytest.raises(ValueError, match="-inf"):
+        solve_assignment(np.array([[0.1, -np.inf]], dtype=np.float64), max_cost=0.5)

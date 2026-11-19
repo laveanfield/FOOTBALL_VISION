@@ -76,10 +76,11 @@ def select_ball_track(
             accepted.append((fid, bx, by, bconf, False))
             continue
         prev_fid, prev_x, prev_y, _, _ = accepted[-1]
-        gap = fid - prev_fid - 1
+        span = fid - prev_fid
+        gap = span - 1
         dist = float(np.hypot(bx - prev_x, by - prev_y))
-        # Reject single-segment jumps; after an uninterpolated long break, re-anchor.
-        if gap <= max_gap_frames and dist > max_jump_px:
+        # Scale jump budget by frame span so steady ball motion over gaps passes.
+        if gap <= max_gap_frames and dist > max_jump_px * span:
             continue
         accepted.append((fid, bx, by, bconf, False))
 
@@ -223,7 +224,11 @@ def detect_passes(possession: pd.DataFrame) -> pd.DataFrame:
     for row in ordered.itertuples(index=False):
         tid = int(row.track_id)
         team = int(row.team)
-        if tid < 0 or team == TEAM_UNKNOWN:
+        if tid < 0:
+            continue
+        if team == TEAM_UNKNOWN:
+            prev_tid = None
+            prev_team = None
             continue
         if prev_tid is not None and tid != prev_tid and team == prev_team:
             passes.append((int(row.frame_id), prev_tid, tid, team))

@@ -66,7 +66,7 @@ def solve_assignment(
         ``(row, col)`` pairs, sorted by row.
 
     Raises:
-        ValueError: If ``cost`` is not 2D or contains ``NaN`` entries.
+        ValueError: If ``cost`` is not 2D or contains ``NaN`` or ``-inf`` entries.
     """
     cost_mat = np.asarray(cost, dtype=np.float64)
     if cost_mat.ndim != 2:
@@ -76,20 +76,23 @@ def solve_assignment(
         return [], list(range(n_rows)), list(range(n_cols))
     if np.isnan(cost_mat).any():
         raise ValueError("Cost matrix must not contain NaN values")
+    if np.isneginf(cost_mat).any():
+        raise ValueError("Cost matrix must not contain -inf values")
 
-    work_cost = cost_mat
-    if np.isposinf(cost_mat).any() and np.isfinite(max_cost):
-        # Replace +inf with a finite sentinel above max_cost so Hungarian stays valid.
-        finite = cost_mat[np.isfinite(cost_mat)]
-        max_abs = float(np.max(np.abs(finite))) if finite.size else 0.0
-        sentinel = max(float(max_cost), 0.0) + max(n_rows, n_cols) * max_abs + 1e6
-        work_cost = np.where(np.isposinf(cost_mat), sentinel, cost_mat)
+    valid = np.isfinite(cost_mat) & (cost_mat <= max_cost)
+    if not valid.any():
+        return [], list(range(n_rows)), list(range(n_cols))
+
+    # Clamp both +inf and finite costs exceeding max_cost to one uniform sentinel
+    # so disallowed edges cannot steer Hungarian away from valid assignments.
+    max_abs = float(np.max(np.abs(cost_mat[valid])))
+    finite_gate = max(float(max_cost), 0.0) if np.isfinite(max_cost) else 0.0
+    sentinel = (2 * max(n_rows, n_cols) + 1) * max_abs + finite_gate + 1e6
+    work_cost = np.where(valid, cost_mat, sentinel)
 
     row_ind, col_ind = linear_sum_assignment(work_cost)
     matches = [
-        (int(r), int(c))
-        for r, c in zip(row_ind, col_ind, strict=True)
-        if cost_mat[r, c] <= max_cost
+        (int(r), int(c)) for r, c in zip(row_ind, col_ind, strict=True) if valid[r, c]
     ]
     matches.sort(key=lambda pair: pair[0])
     matched_rows = {r for r, _ in matches}

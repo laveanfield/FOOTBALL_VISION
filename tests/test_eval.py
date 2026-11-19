@@ -250,3 +250,27 @@ def test_evaluate_tracking_perfect_and_id_switch() -> None:
 
     empty_res = evaluate_tracking(gt, gt.iloc[0:0], iou_threshold=0.5)
     assert empty_res["mota"] == 0.0 and empty_res["hota"] == 0.0
+
+
+def test_evaluate_detections_excludes_zero_gt_classes_from_map() -> None:
+    """Excludes classes absent from ground truth when averaging mAP."""
+    gt = pd.DataFrame(
+        [{"frame_id": 0, "x1": 10.0, "y1": 10.0, "x2": 30.0, "y2": 50.0, "cls": 0}]
+    )
+    preds = pd.DataFrame(
+        [
+            {
+                "frame_id": 0,
+                "x1": 10.0,
+                "y1": 10.0,
+                "x2": 30.0,
+                "y2": 50.0,
+                "conf": 0.95,
+                "cls": 0,
+            }
+        ]
+    )
+    res = evaluate_detections(preds, gt, iou_threshold=0.5, classes=[0, 32])
+    assert res["map50"] == pytest.approx(1.0)
+    assert res["map50_95"] == pytest.approx(1.0)
+    assert res["ap50_cls32"] == 0.0

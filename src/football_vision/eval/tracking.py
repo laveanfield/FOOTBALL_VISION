@@ -82,9 +82,7 @@ def _compute_hota(
     # Precompute per-frame IoU matrices and ID lists once across all alpha thresholds.
     frame_ious: list[tuple[list[int], list[int], np.ndarray]] = []
     for fid in frame_ids:
-        g_ids, g_boxes = gt_by_frame.get(
-            fid, ([], np.empty((0, 4), dtype=np.float64))
-        )
+        g_ids, g_boxes = gt_by_frame.get(fid, ([], np.empty((0, 4), dtype=np.float64)))
         p_ids, p_boxes = pred_by_frame.get(
             fid, ([], np.empty((0, 4), dtype=np.float64))
         )
