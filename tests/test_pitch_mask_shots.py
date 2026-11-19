@@ -106,8 +106,7 @@ def test_detect_shot_boundaries_ignores_pan_drops_flash_and_keeps_short_cut() ->
     assert detect_shot_boundaries(flash_seq, threshold=0.3) == [(0, 14)]
 
     short_insert_seq = [
-        (i, wide if i < 12 else (flash if i < 15 else close_up))
-        for i in range(27)
+        (i, wide if i < 12 else (flash if i < 15 else close_up)) for i in range(27)
     ]
     assert detect_shot_boundaries(short_insert_seq, threshold=0.3) == [
         (0, 11),

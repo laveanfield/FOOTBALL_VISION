@@ -132,9 +132,7 @@ def test_merge_collinear_segments_keeps_parallel_and_crossing_separate() -> None
     assert len(merged) == 3
 
 
-def test_merge_collinear_segments_handles_pi_wraparound_and_degenerate_inputs() -> (
-    None
-):
+def test_merge_collinear_segments_handles_pi_wraparound_and_degenerate_inputs() -> None:
     """Checks vertical wrap-around near theta=0/pi and zero-length segment removal."""
     vertical = np.array(
         [

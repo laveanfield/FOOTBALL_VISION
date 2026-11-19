@@ -209,8 +209,7 @@ def _merge_parallel_clusters(
         dtype=np.float64,
     )
     angle_gap = np.abs(
-        (directions[:, None] - directions[None, :] + np.pi / 2.0) % np.pi
-        - np.pi / 2.0
+        (directions[:, None] - directions[None, :] + np.pi / 2.0) % np.pi - np.pi / 2.0
     )
     _, merged_groups = _connected_components(angle_gap < min_separation_rad)
     remap = {
