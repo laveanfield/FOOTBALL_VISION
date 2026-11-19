@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
+from scipy.optimize import linear_sum_assignment
 
 from football_vision.boxes import iou_matrix
 
@@ -22,6 +23,28 @@ def build_iou_cost(
         Cost matrix of shape ``(T, D)`` with values in ``[0, 1]``.
     """
     return 1.0 - iou_matrix(track_boxes, detection_boxes)
+
+
+def build_pitch_distance_cost(
+    track_points: npt.ArrayLike,
+    detection_points: npt.ArrayLike,
+) -> npt.NDArray[np.float64]:
+    """Builds the Euclidean distance cost matrix in pitch meters.
+
+    Args:
+        track_points: Predicted track positions ``(X, Y)``, shape ``(T, 2)``.
+        detection_points: Projected foot positions ``(X, Y)``, shape ``(D, 2)``.
+
+    Returns:
+        Distance matrix of shape ``(T, D)`` in meters; non-finite entries are ``inf``.
+    """
+    t_pts = np.asarray(track_points, dtype=np.float64).reshape(-1, 2)
+    d_pts = np.asarray(detection_points, dtype=np.float64).reshape(-1, 2)
+    if len(t_pts) == 0 or len(d_pts) == 0:
+        return np.zeros((len(t_pts), len(d_pts)), dtype=np.float64)
+    diff = t_pts[:, None, :] - d_pts[None, :, :]
+    dist = np.linalg.norm(diff, axis=2)
+    return np.where(np.isfinite(dist), dist, np.inf)
 
 
 def solve_assignment(
@@ -43,7 +66,37 @@ def solve_assignment(
         ``(row, col)`` pairs, sorted by row.
 
     Raises:
-        NotImplementedError: Stub; to be implemented by member C.
+        ValueError: If ``cost`` is not 2D or contains ``NaN`` or ``-inf`` entries.
     """
-    # TODO(C): handle empty matrices before calling linear_sum_assignment.
-    raise NotImplementedError("TODO(C): implement solve_assignment")
+    cost_mat = np.asarray(cost, dtype=np.float64)
+    if cost_mat.ndim != 2:
+        raise ValueError(f"Expected 2D cost matrix, got shape {cost_mat.shape}")
+    n_rows, n_cols = cost_mat.shape
+    if n_rows == 0 or n_cols == 0:
+        return [], list(range(n_rows)), list(range(n_cols))
+    if np.isnan(cost_mat).any():
+        raise ValueError("Cost matrix must not contain NaN values")
+    if np.isneginf(cost_mat).any():
+        raise ValueError("Cost matrix must not contain -inf values")
+
+    valid = np.isfinite(cost_mat) & (cost_mat <= max_cost)
+    if not valid.any():
+        return [], list(range(n_rows)), list(range(n_cols))
+
+    # Clamp both +inf and finite costs exceeding max_cost to one uniform sentinel
+    # so disallowed edges cannot steer Hungarian away from valid assignments.
+    max_abs = float(np.max(np.abs(cost_mat[valid])))
+    finite_gate = max(float(max_cost), 0.0) if np.isfinite(max_cost) else 0.0
+    sentinel = (2 * max(n_rows, n_cols) + 1) * max_abs + finite_gate + 1e6
+    work_cost = np.where(valid, cost_mat, sentinel)
+
+    row_ind, col_ind = linear_sum_assignment(work_cost)
+    matches = [
+        (int(r), int(c)) for r, c in zip(row_ind, col_ind, strict=True) if valid[r, c]
+    ]
+    matches.sort(key=lambda pair: pair[0])
+    matched_rows = {r for r, _ in matches}
+    matched_cols = {c for _, c in matches}
+    unmatched_rows = [r for r in range(n_rows) if r not in matched_rows]
+    unmatched_cols = [c for c in range(n_cols) if c not in matched_cols]
+    return matches, unmatched_rows, unmatched_cols

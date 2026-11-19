@@ -26,13 +26,6 @@ FOUR_PIXELS = np.array(
     [[100.0, 100.0], [1100.0, 120.0], [1000.0, 650.0], [150.0, 600.0]]
 )
 
-kalman_todo = pytest.mark.xfail(
-    raises=NotImplementedError, reason="TODO(C): tracking.kalman", strict=False
-)
-assign_todo = pytest.mark.xfail(
-    raises=NotImplementedError, reason="TODO(C): tracking.association", strict=False
-)
-
 
 def kalman_model(
     dt: float = 0.04,
@@ -93,7 +86,6 @@ def test_ransac_rejects_gross_outliers() -> None:
     )
 
 
-@kalman_todo
 def test_kalman_predict_follows_the_motion_model() -> None:
     """Checks that prediction moves the state by velocity * dt and grows uncertainty."""
     f, m, q, r = kalman_model(dt=0.1)
@@ -102,7 +94,6 @@ def test_kalman_predict_follows_the_motion_model() -> None:
     assert np.all(np.diag(kalman.p) >= 1.0)
 
 
-@kalman_todo
 def test_kalman_update_pulls_the_estimate_toward_the_measurement() -> None:
     """Checks that a position measurement moves only the measured axis."""
     f, m, q, r = kalman_model()
@@ -113,7 +104,6 @@ def test_kalman_update_pulls_the_estimate_toward_the_measurement() -> None:
     assert updated[1] == pytest.approx(0.0, abs=1e-9)
 
 
-@kalman_todo
 def test_kalman_tracks_constant_velocity_from_noisy_positions() -> None:
     """Checks that velocity is recovered from noisy position measurements alone."""
     rng = np.random.default_rng(0)
@@ -129,7 +119,6 @@ def test_kalman_tracks_constant_velocity_from_noisy_positions() -> None:
     assert np.linalg.norm(kalman.x[:2] - velocity * 150 * dt) < 0.5
 
 
-@kalman_todo
 def test_kalman_gating_distance_grows_with_distance() -> None:
     """Checks that the squared Mahalanobis distance is zero at the prediction."""
     f, m, q, r = kalman_model()
@@ -140,7 +129,6 @@ def test_kalman_gating_distance_grows_with_distance() -> None:
     assert distances[0] < distances[1] < distances[2]
 
 
-@assign_todo
 def test_assignment_matches_optimally_and_applies_the_gate() -> None:
     """Checks the optimal matching, gating and the unmatched indices."""
     cost = np.array([[0.1, 0.9, 0.9], [0.9, 0.2, 0.9], [0.9, 0.9, 0.95]])

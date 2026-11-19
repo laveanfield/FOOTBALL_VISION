@@ -105,12 +105,10 @@ class KalmanFilter:
 
         Returns:
             The predicted state of shape ``(dim_x,)``; ``x`` and ``p`` are updated.
-
-        Raises:
-            NotImplementedError: Stub; to be implemented by member C.
         """
-        # TODO(C): x = F x ; P = F P F^T + Q  (see the module docstring).
-        raise NotImplementedError("TODO(C): implement KalmanFilter.predict")
+        self.x = self.f @ self.x
+        self.p = self.f @ self.p @ self.f.T + self.q
+        return self.x.copy()
 
     def update(self, z: npt.ArrayLike) -> npt.NDArray[np.float64]:
         """Corrects the prediction with a measurement.
@@ -122,11 +120,24 @@ class KalmanFilter:
             The corrected state of shape ``(dim_x,)``; ``x`` and ``p`` are updated.
 
         Raises:
-            NotImplementedError: Stub; to be implemented by member C.
+            ValueError: If ``z`` does not match the measurement dimension ``dim_z``.
         """
-        # TODO(C): S = M P M^T + R ; K = P M^T S^-1 ; x += K (z - M x) ;
-        #   P = (I - K M) P. Prefer np.linalg.solve over an explicit inverse.
-        raise NotImplementedError("TODO(C): implement KalmanFilter.update")
+        z_vec = np.asarray(z, dtype=np.float64).reshape(-1)
+        expected_dim = self.m.shape[0]
+        if z_vec.shape != (expected_dim,):
+            raise ValueError(
+                f"Expected measurement of shape ({expected_dim},), got {z_vec.shape}"
+            )
+        innovation = z_vec - self.m @ self.x
+        s = self.m @ self.p @ self.m.T + self.r
+        # Solve S^T K^T = (P M^T)^T instead of inverting S explicitly.
+        k = np.linalg.solve(s.T, (self.p @ self.m.T).T).T
+        self.x = self.x + k @ innovation
+        # Joseph form keeps posterior covariance symmetric and positive semi-definite.
+        identity = np.eye(self.x.shape[0], dtype=np.float64)
+        ikh = identity - k @ self.m
+        self.p = ikh @ self.p @ ikh.T + k @ self.r @ k.T
+        return self.x.copy()
 
     def gating_distance(self, measurements: npt.ArrayLike) -> npt.NDArray[np.float64]:
         """Computes squared Mahalanobis distances from the prediction to measurements.
@@ -142,7 +153,18 @@ class KalmanFilter:
             Array of shape ``(N,)`` with squared Mahalanobis distances.
 
         Raises:
-            NotImplementedError: Stub; to be implemented by member C.
+            ValueError: If ``measurements`` is not 2D with width ``dim_z``.
         """
-        # TODO(C): d^2 = (z - M x)^T S^-1 (z - M x) with S = M P M^T + R.
-        raise NotImplementedError("TODO(C): implement KalmanFilter.gating_distance")
+        meas = np.asarray(measurements, dtype=np.float64)
+        expected_dim = self.m.shape[0]
+        if meas.ndim != 2 or meas.shape[1] != expected_dim:
+            raise ValueError(
+                f"Expected measurements of shape (N, {expected_dim}), got {meas.shape}"
+            )
+        if meas.shape[0] == 0:
+            return np.empty(0, dtype=np.float64)
+        diff = meas - (self.m @ self.x)
+        s = self.m @ self.p @ self.m.T + self.r
+        solved = np.linalg.solve(s, diff.T)
+        distances = np.sum(diff * solved.T, axis=1)
+        return np.maximum(distances, 0.0)

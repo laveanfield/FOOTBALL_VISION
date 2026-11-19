@@ -23,7 +23,13 @@ dependencies = [
 dl = ["ultralytics>=8.3"]
 tracking = ["supervision>=0.22", "motmetrics>=1.4"]
 demo = ["streamlit>=1.30"]
-dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.5", "pydoclint>=0.5"]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.5",
+    "pydoclint>=0.5",
+    "motmetrics>=1.4",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from football_vision.artifacts import HOMOGRAPHY_QUALITY_COLUMNS, HomographySequence
+from football_vision.eval.detection import evaluate_detections
 from football_vision.eval.homography import (
     evaluate_homography_sequence,
     reference_point_jitter_px,
@@ -18,7 +19,7 @@ from football_vision.eval.homography import (
 from football_vision.eval.profiling import StageProfiler, Timer
 from football_vision.eval.speed import speed_sanity_report
 from football_vision.eval.team import confusion_table, team_accuracy
-from football_vision.eval.tracking import load_mot_ground_truth
+from football_vision.eval.tracking import evaluate_tracking, load_mot_ground_truth
 from football_vision.homography.geometry import apply_homography, invert_homography
 from football_vision.pitch.template import PitchTemplate
 
@@ -132,3 +133,144 @@ def test_timer_and_stage_profiler() -> None:
     assert summary.loc["detect", "fps"] == pytest.approx(25.0)
     assert summary.loc["detect", "ms_per_item"] == pytest.approx(40.0)
     assert summary.loc["track", "calls"] == 1
+
+
+def test_evaluate_detections_precision_recall_and_map() -> None:
+    """Verifies detection metrics, unannotated frame filtering, and COCO 101-pt AP."""
+    gt = pd.DataFrame(
+        [
+            {"frame_id": 0, "x1": 10.0, "y1": 10.0, "x2": 30.0, "y2": 50.0, "cls": 0},
+            {"frame_id": 0, "x1": 60.0, "y1": 20.0, "x2": 68.0, "y2": 28.0, "cls": 32},
+        ]
+    )
+    preds = pd.DataFrame(
+        [
+            {
+                "frame_id": 0,
+                "x1": 10.0,
+                "y1": 10.0,
+                "x2": 30.0,
+                "y2": 50.0,
+                "conf": 0.95,
+                "cls": 0,
+            },
+            {
+                "frame_id": 0,
+                "x1": 60.0,
+                "y1": 20.0,
+                "x2": 68.0,
+                "y2": 28.0,
+                "conf": 0.85,
+                "cls": 32,
+            },
+            # Unannotated frame must be ignored by evaluate_detections.
+            {
+                "frame_id": 5,
+                "x1": 0.0,
+                "y1": 0.0,
+                "x2": 10.0,
+                "y2": 10.0,
+                "conf": 0.90,
+                "cls": 0,
+            },
+        ]
+    )
+    perfect = evaluate_detections(preds, gt, iou_threshold=0.5)
+    assert perfect["precision"] == pytest.approx(1.0)
+    assert perfect["recall"] == pytest.approx(1.0)
+    assert perfect["map50"] == pytest.approx(1.0)
+    assert perfect["map50_95"] == pytest.approx(1.0)
+    assert perfect["precision_cls0"] == pytest.approx(1.0)
+
+    # Single FP after 1 TP out of 2 GT on cls 0 yields precision=0.5, recall=0.5.
+    gt_two = pd.DataFrame(
+        [
+            {"frame_id": 0, "x1": 10.0, "y1": 10.0, "x2": 30.0, "y2": 50.0, "cls": 0},
+            {"frame_id": 0, "x1": 80.0, "y1": 10.0, "x2": 100.0, "y2": 50.0, "cls": 0},
+        ]
+    )
+    preds_mixed = pd.DataFrame(
+        [
+            {
+                "frame_id": 0,
+                "x1": 10.0,
+                "y1": 10.0,
+                "x2": 30.0,
+                "y2": 50.0,
+                "conf": 0.9,
+                "cls": 0,
+            },
+            {
+                "frame_id": 0,
+                "x1": 120.0,
+                "y1": 10.0,
+                "x2": 140.0,
+                "y2": 50.0,
+                "conf": 0.5,
+                "cls": 0,
+            },
+        ]
+    )
+    mixed = evaluate_detections(preds_mixed, gt_two, iou_threshold=0.5)
+    assert mixed["precision"] == pytest.approx(0.5)
+    assert mixed["recall"] == pytest.approx(0.5)
+    assert mixed["map50"] == pytest.approx(51.0 / 101.0)
+
+
+def test_evaluate_tracking_perfect_and_id_switch() -> None:
+    """Checks MOTA, IDF1, HOTA, id_switches, and fragmentations."""
+    gt = pd.DataFrame(
+        [
+            {
+                "frame_id": fid,
+                "track_id": 1,
+                "x1": 10.0 + fid,
+                "y1": 20.0,
+                "x2": 30.0 + fid,
+                "y2": 60.0,
+            }
+            for fid in range(4)
+        ]
+    )
+    perfect = evaluate_tracking(gt.copy(), gt, iou_threshold=0.5)
+    assert perfect["mota"] == pytest.approx(1.0)
+    assert perfect["idf1"] == pytest.approx(1.0)
+    assert perfect["hota"] == pytest.approx(1.0)
+    assert perfect["id_switches"] == 0.0
+    assert perfect["fragmentations"] == 0.0
+
+    # Flip predicted track_id halfway -> MOTA drops for IDSW, IDF1/HOTA drop too.
+    switched = gt.copy()
+    switched.loc[switched["frame_id"] >= 2, "track_id"] = 2
+    res = evaluate_tracking(switched, gt, iou_threshold=0.5)
+    assert res["id_switches"] >= 1.0
+    assert res["mota"] < 1.0
+    assert res["idf1"] == pytest.approx(0.5)
+    assert 0.5 < res["hota"] < 1.0
+
+    empty_res = evaluate_tracking(gt, gt.iloc[0:0], iou_threshold=0.5)
+    assert empty_res["mota"] == 0.0 and empty_res["hota"] == 0.0
+
+
+def test_evaluate_detections_excludes_zero_gt_classes_from_map() -> None:
+    """Excludes classes absent from ground truth when averaging mAP."""
+    gt = pd.DataFrame(
+        [{"frame_id": 0, "x1": 10.0, "y1": 10.0, "x2": 30.0, "y2": 50.0, "cls": 0}]
+    )
+    preds = pd.DataFrame(
+        [
+            {
+                "frame_id": 0,
+                "x1": 10.0,
+                "y1": 10.0,
+                "x2": 30.0,
+                "y2": 50.0,
+                "conf": 0.95,
+                "cls": 0,
+            }
+        ]
+    )
+    res = evaluate_detections(preds, gt, iou_threshold=0.5, classes=[0, 32])
+    assert res["map50"] == pytest.approx(1.0)
+    assert res["map50_95"] == pytest.approx(1.0)
+    assert res["ap50_cls32"] == 0.0
