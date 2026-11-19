@@ -8,7 +8,7 @@ All tests are fast, deterministic, and self-contained — they run in ~10–15 s
 
 | Goal | Command (`uv`) | Command (venv python) |
 |---|---|---|
-| Full suite + branch & HTML coverage | `uv run pytest` | `python -m pytest` |
+| Full suite + branch & HTML coverage | `uv run python -m pytest` *(or `uv run pytest`)* | `python -m pytest` |
 | Fast run (skip coverage) | `uv run pytest --no-cov` | `python -m pytest --no-cov` |
 | Run one test file | `uv run pytest tests/test_homography.py --no-cov` | `python -m pytest tests/test_homography.py --no-cov` |
 | Filter tests by keyword | `uv run pytest -k "tracker or stitch" --no-cov` | `python -m pytest -k "tracker or stitch" --no-cov` |

@@ -30,3 +30,6 @@ runs/
 .idea/
 .vscode/
 .DS_Store
+
+# LaTeX outputs
+dist_latex/

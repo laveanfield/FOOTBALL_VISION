@@ -11,19 +11,51 @@ tested, and verified** end-to-end.
 
 ---
 
-## 1. Installation (`uv`)
+## 1. Installation
 
-This project uses `pyproject.toml` + `uv.lock` (replacing `requirements.txt`).
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then sync the
-environment:
+This project is configured via modern Python packaging (`pyproject.toml` + `uv.lock`, compatible with Python 3.10–3.12).
 
+### Option A: Using `uv` (Recommended — 10-100x faster)
+
+If you don't have `uv` installed yet, install it in one command:
+* **Windows (PowerShell):**
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+* **macOS / Linux:**
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+Then simply clone and sync:
 ```bash
-# Full environment: core + YOLO detection + tracking baselines + Streamlit demo + dev tools
+# Full environment: core + YOLO + tracking + Streamlit demo + dev/test tools
 uv sync --all-extras
 
-# Or core + dev/test tools only (fast, used in CI)
+# Or core + dev/test tools only
 uv sync
 ```
+*(A `.python-version` pinning `3.12` is included in the repository; `uv` will automatically download and use isolated Python 3.12 even if your machine has an incompatible Python version).*
+
+---
+
+### Option B: Traditional `pip` / `venv` (No `uv` required)
+
+If you prefer standard Python without installing `uv`:
+```bash
+# 1. Create and activate a virtual environment (Python 3.10 to 3.12)
+python -m venv venv
+
+# Windows:
+.\venv\Scripts\activate
+# Linux / macOS:
+source venv/bin/activate
+
+# 2. Install package with all dependencies directly from pyproject.toml
+pip install -e ".[all,dev]"
+```
+
+---
 
 > **Windows note:** `pyproject.toml` pins `opencv-python>=4.8,<5.0` because OpenCV
 > `5.x` ships unsigned binaries that Windows Smart App Control may block. If
@@ -35,9 +67,11 @@ Verify code style, Google docstrings, tests, and coverage:
 
 ```bash
 uv run ruff check .
-uv run pydoclint src tests scripts demo
-uv run pytest
+uv run python -m pydoclint.main src tests scripts demo
+uv run python -m pytest
 ```
+
+*(On Linux / macOS you can also run `uv run pydoclint ...` and `uv run pytest` directly; on Windows, using `python -m` ensures Windows Smart App Control does not block the unsigned `.exe` shims).*
 
 ---
 
@@ -49,13 +83,13 @@ checked into the repository so the demo works immediately after cloning — even
 downloading full raw videos into `data/raw/`:
 
 ```bash
-uv run streamlit run demo/streamlit_app.py
+uv run python -m streamlit run demo/streamlit_app.py
 ```
 
 To inspect your own pipeline run under `outputs/<run_name>/`:
 
 ```bash
-uv run streamlit run demo/streamlit_app.py -- --run-dir outputs/base_c004_f675
+uv run python -m streamlit run demo/streamlit_app.py -- --run-dir outputs/base_c004_f675
 ```
 
 If raw source video is present in `data/raw/`, Streamlit renders interactive toggled
