@@ -1,0 +1,38 @@
+{
+  "preprocess": {
+    "status": "skipped",
+    "seconds": 0.0
+  },
+  "pitch_lines": {
+    "status": "skipped",
+    "seconds": 0.0
+  },
+  "homography": {
+    "status": "skipped",
+    "seconds": 0.0
+  },
+  "detect": {
+    "status": "ran",
+    "seconds": 33.222
+  },
+  "track": {
+    "status": "ran",
+    "seconds": 0.556
+  },
+  "team": {
+    "status": "ran",
+    "seconds": 1.593
+  },
+  "project": {
+    "status": "ran",
+    "seconds": 0.066
+  },
+  "analytics": {
+    "status": "ran",
+    "seconds": 0.752
+  },
+  "render": {
+    "status": "ran",
+    "seconds": 6.767
+  }
+}

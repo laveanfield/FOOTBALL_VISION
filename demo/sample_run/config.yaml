@@ -1,0 +1,104 @@
+run_name: base_c004_f675
+output_dir: outputs
+seed: 42
+stages:
+- preprocess
+- pitch_lines
+- homography
+- detect
+- track
+- project
+- analytics
+- render
+video:
+  path: data\raw\v_HdiyOtliFiw_c004.mp4
+  size:
+  - 1280
+  - 720
+  start_frame: 675
+  end_frame: 1025
+  stride: 1
+preprocess:
+  detect_shots: true
+  shot_threshold: 0.5
+  compute_pitch_mask: true
+  denoise: none
+  use_clahe: true
+  grass_hsv_low:
+  - 35
+  - 40
+  - 40
+  grass_hsv_high:
+  - 85
+  - 255
+  - 255
+  morph_kernel: 7
+pitch:
+  edge_method: canny
+  blur_sigma: 1.4
+  canny_low: 50
+  canny_high: 150
+  tophat_kernel: 15
+  hough_rho: 1.0
+  hough_threshold: 80
+  hough_min_length: 60
+  hough_max_gap: 10
+homography:
+  mode: propagate
+  landmarks_path: data\annotations\v_HdiyOtliFiw_c004_landmarks_f675.json
+  ransac_threshold_px: 3.0
+  feature: sift
+  ratio_test: 0.75
+  min_inliers: 15
+  reanchor_overlay_threshold: 0.0
+  reanchor_every_n: 0
+  smoothing_window: 9
+detection:
+  weights: yolov8s.pt
+  imgsz: 960
+  conf: 0.25
+  iou: 0.5
+  classes:
+  - 0
+  - 32
+  device: null
+  half: false
+  min_box_height_px: 20.0
+  use_pitch_mask: true
+  pitch_mask_margin_px: 10
+  use_tiling: false
+tracking:
+  tracker: bytetrack
+  space: image
+  high_thresh: 0.5
+  low_thresh: 0.1
+  match_thresh: 0.9
+  track_buffer: 45
+  min_track_len: 5
+  stitch: true
+  max_stitch_gap: 30
+team:
+  n_clusters: 3
+  torso_top_ratio: 0.15
+  torso_bottom_ratio: 0.55
+  color_space: lab
+  exclude_grass: true
+analytics:
+  pitch_margin_m: 3.0
+  smooth_window: 15
+  smooth_polyorder: 2
+  max_gap_frames: 5
+  heatmap_cell_m: 1.0
+  heatmap_sigma_m: 2.0
+  max_speed_mps: 12.0
+  speed_zone_edges_kmh:
+  - 7.0
+  - 14.0
+  - 20.0
+  - 25.0
+  exclude_goalkeeper_from_shape: true
+viz:
+  trail_length: 50
+  draw_pitch_lines: true
+  topdown_scale_px_per_m: 8.0
+  codec: mp4v

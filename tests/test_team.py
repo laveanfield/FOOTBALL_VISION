@@ -180,3 +180,57 @@ def test_vote_and_assign_handle_empty_tables() -> None:
     labels = assign_teams_and_roles(voted, empty_tracks, TeamConfig())
     assert list(labels.columns) == list(TEAM_LABEL_COLUMNS)
     assert labels.empty
+
+
+def test_lab_classifier_groups_striped_kit_across_luminance_shifts() -> None:
+    """Clusters dark-striped and bright-yellow samples in weighted Lab space."""
+    rng = np.random.default_rng(12)
+    white_samples = np.array([195.0, 130.0, 122.0]) + rng.normal(0.0, 3.0, (12, 3))
+    yellow_dark = np.array([95.0, 122.0, 160.0]) + rng.normal(0.0, 3.0, (6, 3))
+    yellow_bright = np.array([185.0, 119.0, 175.0]) + rng.normal(0.0, 3.0, (6, 3))
+    ref_samples = np.array([105.0, 125.0, 92.0]) + rng.normal(0.0, 3.0, (6, 3))
+
+    features = np.vstack([white_samples, yellow_dark, yellow_bright, ref_samples])
+    clf = TeamClassifier(TeamConfig(n_clusters=3, color_space="lab"))
+    clf.fit(features)
+    preds = clf.predict(features)
+
+    assert len(np.unique(preds[:12])) == 1
+    assert len(np.unique(preds[12:24])) == 1
+    assert len(np.unique(preds[24:])) == 1
+    assert len({int(preds[0]), int(preds[12]), int(preds[24])}) == 3
+
+
+def test_assign_roles_uses_pitch_x_for_goalkeeper_vs_referee() -> None:
+    """Places central-image goalkeepers by pitch X near goal instead of pixel edge."""
+    samples = pd.DataFrame(
+        [
+            {"track_id": 1, "cluster": 0},
+            {"track_id": 2, "cluster": 0},
+            {"track_id": 3, "cluster": 1},
+            {"track_id": 4, "cluster": 1},
+            {"track_id": 5, "cluster": 2},
+            {"track_id": 6, "cluster": 2},
+        ]
+    )
+    tracks = pd.DataFrame(
+        [
+            {
+                "frame_id": 0,
+                "track_id": tid,
+                "x1": 400.0 + 30.0 * idx,
+                "y1": 200.0,
+                "x2": 430.0 + 30.0 * idx,
+                "y2": 280.0,
+            }
+            for idx, tid in enumerate([1, 2, 3, 4, 5, 6])
+        ]
+    )
+    labels = assign_teams_and_roles(
+        samples,
+        tracks,
+        TeamConfig(n_clusters=3),
+        pitch_x_by_track={5: 4.5, 6: 22.0},
+    ).set_index("track_id")
+    assert labels.loc[5, "role"] == ROLE_GOALKEEPER
+    assert labels.loc[6, "role"] == ROLE_REFEREE

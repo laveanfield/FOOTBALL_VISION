@@ -1,30 +1,39 @@
 # Uses .RECIPEPREFIX so recipes do not need literal tab characters.
 .RECIPEPREFIX = >
-.PHONY: install lint format docstyle test check run clean
+.PHONY: install install-dev lint format docstyle test test-fast coverage check run clean
 
 VIDEO ?= data/raw/clip.mp4
 
 install:
-> python -m pip install -e ".[dev]"
+> uv sync --all-extras
+
+install-dev:
+> uv sync
 
 lint:
-> python -m ruff check .
+> uv run ruff check .
 
 format:
-> python -m ruff format .
-> python -m ruff check --fix .
+> uv run ruff format .
+> uv run ruff check --fix .
 
 docstyle:
-> python -m pydoclint.main src tests scripts demo
+> uv run pydoclint src tests scripts demo
 
 test:
-> python -m pytest
+> uv run pytest
+
+test-fast:
+> uv run pytest --no-cov
+
+coverage:
+> uv run pytest --cov=football_vision --cov-branch --cov-report=term-missing --cov-report=html
 
 check: lint docstyle test
 
 run:
-> python scripts/run_pipeline.py --config configs/walking_skeleton.yaml --set video.path=$(VIDEO)
+> uv run python scripts/run_pipeline.py --config configs/walking_skeleton.yaml --set video.path=$(VIDEO)
 
 clean:
-> rm -rf .pytest_cache .ruff_cache build dist src/*.egg-info
+> rm -rf .pytest_cache .ruff_cache .coverage htmlcov build dist src/*.egg-info
 > find . -name "__pycache__" -type d -prune -exec rm -rf {} +

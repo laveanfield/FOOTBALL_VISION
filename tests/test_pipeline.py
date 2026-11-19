@@ -357,3 +357,118 @@ def test_fixed_homography_stage_marks_degenerate_landmarks_invalid(
     sequence = runner.ctx.store.read_homographies()
     assert len(sequence.matrices) == N_FRAMES
     assert not sequence.is_valid(0)
+
+
+def test_preprocess_pitch_lines_detection_tiling_and_stage_errors(
+    base_cfg: PipelineConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Covers mask preprocess, pitch_lines, tiled detect, pitch track, and errors."""
+    cfg = apply_overrides(
+        base_cfg,
+        {
+            "run_name": "full_opts",
+            "preprocess.detect_shots": True,
+            "preprocess.compute_pitch_mask": True,
+            "preprocess.denoise": "gaussian",
+            "preprocess.use_clahe": True,
+            "detection.use_pitch_mask": True,
+            "detection.use_tiling": True,
+            "tracking.space": "pitch",
+        },
+    )
+    monkeypatch.setattr(
+        "football_vision.pipeline.stages.YoloDetector", lambda _cfg: FakeDetector()
+    )
+    runner = PipelineRunner(cfg)
+    runner.run(["preprocess", "pitch_lines", "detect"])
+    store = runner.ctx.store
+    assert store.exists("pitch_lines.csv")
+    assert store.path("pitch_mask").is_dir()
+
+    with pytest.raises(PipelineError, match="homography.npy"):
+        runner.run(["track"])
+
+    # Run ablation copying pitch_mask subdirectory and with output_csv=None
+    ab = Ablation("T2", "No-op pitch_lines", ("pitch_lines",), ("rows",), {"a": {}})
+    table = run_ablation(ab, cfg, lambda _c, d: {"rows": float(len(d.name))})
+    assert len(table) == 1
+    assert (cfg.run_dir.parent / "full_opts_T2_a" / "pitch_mask").is_dir()
+
+    # Render without detections raises clear PipelineError
+    cfg_nodet = apply_overrides(base_cfg, {"run_name": "nodet"})
+    r2 = PipelineRunner(cfg_nodet)
+    r2.run(["preprocess"])
+    with pytest.raises(PipelineError, match="detect"):
+        r2.run(["render"])
+
+
+def test_propagate_homography_and_pitch_x_team_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Covers _run_propagate (alignment, re-anchor, smoothing) and pitch-X TeamStage."""
+    video_path = tmp_path / "prop.mp4"
+    size = (320, 180)
+    writer = cv2.VideoWriter(
+        str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), 25.0, size
+    )
+    if not writer.isOpened():
+        pytest.skip("OpenCV cannot write mp4 files in this environment")
+    rng = np.random.default_rng(42)
+    base = np.full((180, 320, 3), (50, 130, 50), dtype=np.uint8)
+    for _ in range(30):
+        cx, cy = int(rng.integers(20, 290)), int(rng.integers(20, 150))
+        cv2.rectangle(base, (cx, cy), (cx + 10, cy + 10), (240, 240, 240), -1)
+    # Two players: GK near left goal (x=30) and ref midfield (x=200)
+    for i in range(6):
+        shift = np.float32([[1, 0, i], [0, 1, 0]])
+        frame = cv2.warpAffine(base, shift, size)
+        cv2.rectangle(frame, (25, 60), (45, 130), (220, 40, 20), -1)
+        cv2.rectangle(frame, (190, 60), (210, 130), (20, 220, 220), -1)
+        writer.write(frame)
+    writer.release()
+
+    template = PitchTemplate()
+    names = ["corner_tl", "corner_tr", "corner_br", "corner_bl", "center"]
+    h_p2i = np.array([[2.5, 0.2, 10.0], [0.1, 2.2, 10.0], [0.0, 0.0, 1.0]])
+    img_pts = apply_homography(h_p2i, template.landmark_array(names))
+    lm_path = save_landmarks_json(
+        {n: tuple(p) for n, p in zip(names, img_pts, strict=True)},
+        tmp_path / "lm_prop.json",
+    )
+
+    class _TwoDet(Detector):
+        def detect(self, frame: Frame) -> Detections:
+            return Detections(
+                np.array([[25, 60, 45, 130], [190, 60, 210, 130]], dtype=np.float32),
+                np.array([0.95, 0.95], dtype=np.float32),
+                np.zeros(2, dtype=np.int64),
+            )
+
+    cfg = apply_overrides(
+        PipelineConfig(),
+        {
+            "video.path": str(video_path),
+            "video.size": list(size),
+            "output_dir": str(tmp_path / "out"),
+            "run_name": "prop_run",
+            "homography.mode": "propagate",
+            "homography.feature": "orb",
+            "homography.min_inliers": 6,
+            "homography.landmarks_path": str(lm_path),
+            "homography.reanchor_overlay_threshold": 0.99,
+            "homography.reanchor_every_n": 2,
+            "homography.smoothing_window": 3,
+            "tracking.space": "pitch",
+            "tracking.min_track_len": 2,
+        },
+    )
+    monkeypatch.setattr(
+        "football_vision.pipeline.stages.estimate_keyframe_homography_auto",
+        lambda *_a, **_kw: np.linalg.inv(h_p2i),
+    )
+    runner = PipelineRunner(cfg, services={"detector": _TwoDet()})
+    runner.run(["preprocess", "homography", "detect", "track", "team", "render"])
+    seq = runner.ctx.store.read_homographies()
+    assert len(seq.matrices) == 6
+    assert runner.ctx.store.exists(TEAM_LABELS)
+    assert runner.ctx.store.exists(OUTPUTS)

@@ -21,8 +21,8 @@ weights/
 *.onnx
 *.engine
 
-# Pipeline outputs
-outputs/
+# Pipeline outputs (anchor root outputs/ so demo/sample_run/outputs/ can be tracked)
+/outputs/
 runs/
 
 # Notebooks and editors

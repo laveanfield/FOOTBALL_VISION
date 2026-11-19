@@ -7,13 +7,25 @@ import numpy as np
 import pytest
 
 from football_vision.errors import HomographyError
-from football_vision.homography.geometry import apply_homography, invert_homography
-from football_vision.homography.keyframe import estimate_keyframe_homography_auto
+from football_vision.homography.dlt import (
+    estimate_homography_dlt,
+    hartley_normalization,
+)
+from football_vision.homography.geometry import (
+    apply_homography,
+    compose_homographies,
+    invert_homography,
+)
+from football_vision.homography.keyframe import (
+    estimate_keyframe_homography_auto,
+    homography_from_landmarks,
+)
 from football_vision.homography.propagation import estimate_frame_alignment
 from football_vision.homography.quality import (
     check_homography_validity,
     line_overlay_score,
 )
+from football_vision.homography.ransac import estimate_homography_ransac
 from football_vision.homography.smoothing import smooth_homography_sequence
 from football_vision.pitch.template import PitchTemplate
 
@@ -145,3 +157,74 @@ def test_smooth_homography_sequence_reduces_jitter_and_handles_singular() -> Non
     broken[3] = 0.0
     fallback = smooth_homography_sequence(broken, reference, window=7)
     np.testing.assert_array_equal(fallback, broken)
+    assert smooth_homography_sequence(mats, reference, window=1).shape == mats.shape
+
+    horizon_crossing = np.eye(3)
+    horizon_crossing[2, :] = [0.0, 0.0, 1.0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        nan_mats = np.repeat(horizon_crossing[None], 5, axis=0)
+        nan_mats[:, 2, 1] = np.nan
+    np.testing.assert_array_equal(
+        smooth_homography_sequence(nan_mats, reference, window=5), nan_mats
+    )
+
+
+def test_homography_validation_and_alignment_edge_cases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Covers DLT, RANSAC, geometry, quality, keyframe, and alignment branches."""
+    template = PitchTemplate()
+    with pytest.raises(ValueError, match="empty"):
+        hartley_normalization(np.zeros((0, 2)))
+    with pytest.raises(ValueError, match="coincide"):
+        hartley_normalization(np.ones((4, 2)))
+    with pytest.raises(HomographyError, match="at least 4"):
+        estimate_homography_dlt(np.zeros((3, 2)), np.zeros((3, 2)))
+    with pytest.raises(HomographyError, match="Degenerate DLT"):
+        estimate_homography_dlt(np.ones((4, 2)), np.arange(8).reshape(4, 2))
+    with pytest.raises(ValueError, match="at least one matrix"):
+        compose_homographies()
+
+    with pytest.raises(HomographyError, match="at least 4"):
+        estimate_homography_ransac(np.zeros((3, 2)), np.zeros((3, 2)), threshold=1.0)
+    collinear = np.array([[float(i), float(i)] for i in range(6)])
+    with pytest.raises(HomographyError, match="no valid homography"):
+        estimate_homography_ransac(collinear, collinear, threshold=1.0, seed=1)
+
+    with pytest.raises(HomographyError, match="cv2.findHomography failed"):
+        monkeypatch.setattr(cv2, "findHomography", lambda *a, **kw: (None, None))
+        homography_from_landmarks(
+            np.ones((4, 2)), np.arange(8, dtype=float).reshape(4, 2)
+        )
+    monkeypatch.undo()
+
+    h_true = invert_homography(_H_PITCH_TO_IMAGE)
+    edge_map, _ = _render_synthetic_pitch_edges(h_true, template)
+    offscreen = np.array([[1.0, 0.0, 1e5], [0.0, 1.0, 1e5], [0.0, 0.0, 1.0]])
+    assert line_overlay_score(edge_map, offscreen, template) == 0.0
+
+    assert not check_homography_validity(np.eye(2), _FRAME_SIZE, template)
+    ill_cond = np.diag([1.0, 1e-8, 1.0])
+    assert not check_homography_validity(ill_cond, _FRAME_SIZE, template)
+    horizon_h = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0 / 500.0, -1.0]])
+    assert not check_homography_validity(horizon_h, _FRAME_SIZE, template)
+
+    rng = np.random.default_rng(9)
+    frame = rng.integers(0, 255, size=(240, 320, 3), dtype=np.uint8)
+    for _ in range(40):
+        cx, cy = int(rng.integers(20, 280)), int(rng.integers(20, 200))
+        cv2.rectangle(frame, (cx, cy), (cx + 12, cy + 12), (255, 255, 255), -1)
+    for feat in ("sift", "akaze"):
+        g, n_in = estimate_frame_alignment(
+            frame,
+            frame,
+            exclude_boxes=np.array([[0, 0, 20, 20]], dtype=np.float32),
+            feature=feat,
+            min_inliers=10,
+        )
+        assert n_in >= 10 and g.shape == (3, 3)
+    blank = np.zeros((120, 160, 3), dtype=np.uint8)
+    with pytest.raises(HomographyError, match="Too few features"):
+        estimate_frame_alignment(blank, blank, feature="orb")
+    with pytest.raises(HomographyError):
+        estimate_frame_alignment(frame, frame, feature="orb", min_inliers=50000)

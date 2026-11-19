@@ -599,7 +599,29 @@ class TeamStage(Stage):
             classifier.fit(matrix)
             samples_table = pd.DataFrame(samples)
             samples_table["cluster"] = classifier.predict(matrix)
-            labels = assign_teams_and_roles(vote_per_track(samples_table), tracks, tcfg)
+            pitch_x_by_track: dict[int, float] | None = None
+            if (
+                store.exists(HOMOGRAPHY)
+                and store.exists(HOMOGRAPHY_QUALITY)
+                and len(tracks) > 0
+            ):
+                projected = project_tracks_to_pitch(
+                    tracks, store.read_homographies(), cfg.analytics.pitch_margin_m
+                )
+                valid_proj = projected[projected["valid"] == 1]
+                if len(valid_proj) > 0:
+                    pitch_x_by_track = {
+                        int(tid): float(x_val)
+                        for tid, x_val in valid_proj.groupby("track_id")["X"]
+                        .median()
+                        .items()
+                    }
+            labels = assign_teams_and_roles(
+                vote_per_track(samples_table),
+                tracks,
+                tcfg,
+                pitch_x_by_track=pitch_x_by_track,
+            )
         store.write_table(TEAM_LABELS, labels)
         merged = tracks.drop(columns=["team", "role"]).merge(
             labels, on="track_id", how="left"

@@ -1,150 +1,227 @@
 # Football Vision
 
-Computer Vision system that turns a football video into **tracked players on a
-top-down pitch map** plus tactical analytics (heatmaps, team shape, distance and
-speed). Classical CV (edges, Hough lines, homography) is combined with pretrained
-deep-learning models (YOLO detection, ByteTrack tracking).
+Computer Vision system that turns broadcast or tactical football video into
+**tracked players on a 2D top-down pitch map** plus tactical analytics (heatmaps,
+team shape, distance, speed, and ball possession). Classical CV (pitch masks, Hough
+lines, DLT/RANSAC homography, SIFT propagation) is combined with deep-learning
+detection (Ultralytics YOLO) and multi-object tracking (SORT / ByteTrack).
 
-This repository is a **code skeleton** generated from the project plan
-(`docs/project_plan_vi.md`, Vietnamese) and the system diagram (`docs/pipeline.drawio`,
-open it at [draw.io](https://app.diagrams.net)). The infrastructure, I/O, orchestration,
-analytics and visualization are implemented and tested; the core CV algorithms are
-**stubs with precise docstrings, `TODO(A|B|C|D)` markers and contract tests**, so the
-team can split the work and implement them independently.
+All pipeline stages (`P1–P9`) from all four contributors (`A–D`) are **implemented,
+tested, and verified** end-to-end.
 
-## Quick start
+---
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,dl,tracking,demo]"   # or: pip install -r requirements.txt && pip install -e .
-make check                                  # ruff + pydoclint + pytest
-```
+## 1. Installation (`uv`)
 
-Phase 0 "walking skeleton" (video -> YOLO -> video with boxes):
+This project uses `pyproject.toml` + `uv.lock` (replacing `requirements.txt`).
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then sync the
+environment:
 
 ```bash
-python scripts/run_pipeline.py --config configs/walking_skeleton.yaml \
-    --set video.path=data/raw/clip.mp4
+# Full environment: core + YOLO detection + tracking baselines + Streamlit demo + dev tools
+uv sync --all-extras
+
+# Or core + dev/test tools only (fast, used in CI)
+uv sync
 ```
 
-Artifacts and videos land in `outputs/walking_skeleton/`. Ultralytics downloads the YOLO
-weights on first use. Stages are cached; re-run one with `--force detect`, or everything
-with `--force`.
+> **Windows note:** `pyproject.toml` pins `opencv-python>=4.8,<5.0` because OpenCV
+> `5.x` ships unsigned binaries that Windows Smart App Control may block. If
+> generated `.exe` shims in `.venv\Scripts\` or `venv\Scripts\` are blocked by
+> Application Control, invoke tools via `python -m <tool>` (e.g.
+> `.\venv\Scripts\python.exe -m pytest`, `python -m pydoclint.main ...`).
 
-## Pipeline stages
+Verify code style, Google docstrings, tests, and coverage:
 
-| Stage (`--stages`) | Phase | Package | Main artifacts | Owner |
+```bash
+uv run ruff check .
+uv run pydoclint src tests scripts demo
+uv run pytest
+```
+
+---
+
+## 2. Instant Interactive Demo (Streamlit)
+
+A lightweight precomputed run (`demo/sample_run/`, generated from `v_HdiyOtliFiw_c004`
+frames `675–1025`, ~3 MB total including compressed H.264 `side_by_side.mp4`) is
+checked into the repository so the demo works immediately after cloning — even before
+downloading full raw videos into `data/raw/`:
+
+```bash
+uv run streamlit run demo/streamlit_app.py
+```
+
+To inspect your own pipeline run under `outputs/<run_name>/`:
+
+```bash
+uv run streamlit run demo/streamlit_app.py -- --run-dir outputs/base_c004_f675
+```
+
+If raw source video is present in `data/raw/`, Streamlit renders interactive toggled
+layers (`Boxes and ids`, `Pitch lines`, `Top-down map`) per frame; when running from
+the bundled sample alone, it shows the rendered MP4 video, matching side-by-side /
+top-down frame viewer, and player kinematics table cleanly.
+
+---
+
+## 3. Running the Full Pipeline
+
+See [data/README.md](data/README.md) to download and convert SportsMOT clips into
+`data/raw/` and `data/annotations/`.
+
+### Option A: Quick "walking skeleton" (video -> YOLO -> boxes)
+
+```bash
+uv run python scripts/run_pipeline.py \
+    --config configs/walking_skeleton.yaml \
+    --set video.path=data/raw/v_HdiyOtliFiw_c004.mp4
+```
+
+### Option B: Fixed or tactical camera (`configs/fixed_camera.yaml`)
+
+1. Annotate pitch landmarks on frame 0 (skip if you already have a landmarks JSON):
+
+   ```bash
+   uv run python scripts/annotate_landmarks.py \
+       --video data/raw/clip.mp4 --frame 0 \
+       --output data/annotations/landmarks_clip.json
+   ```
+
+2. Run the pipeline:
+
+   ```bash
+   uv run python scripts/run_pipeline.py \
+       --config configs/fixed_camera.yaml \
+       --set video.path=data/raw/clip.mp4 \
+       --set homography.landmarks_path=data/annotations/landmarks_clip.json \
+       --stages preprocess pitch_lines homography detect track team project analytics render
+   ```
+
+### Option C: Moving broadcast camera (recommended for SportsMOT `c004` `f675–f1025`)
+
+For panning/tilting broadcast clips, use `configs/broadcast.yaml` (`mode=propagate`),
+a 7-point keyframe anchor, `stitch=true`, and `yolov8s.pt@960`:
+
+```bash
+uv run python scripts/run_pipeline.py \
+    --config configs/broadcast.yaml \
+    --set run_name=base_c004_f675 \
+    --set video.path=data/raw/v_HdiyOtliFiw_c004.mp4 \
+    --set video.start_frame=675 \
+    --set video.end_frame=1025 \
+    --set homography.mode=propagate \
+    --set homography.landmarks_path=data/annotations/v_HdiyOtliFiw_c004_landmarks_f675.json \
+    --set homography.reanchor_overlay_threshold=0.0 \
+    --set homography.reanchor_every_n=0 \
+    --set homography.smoothing_window=9 \
+    --set detection.weights=yolov8s.pt \
+    --set detection.imgsz=960 \
+    --set tracking.tracker=bytetrack \
+    --set tracking.space=image \
+    --set tracking.match_thresh=0.90 \
+    --set tracking.stitch=true \
+    --set tracking.track_buffer=45 \
+    --stages preprocess pitch_lines homography detect track team project analytics render
+```
+
+> Outputs are written to `outputs/<run_name>/` (git-ignored at `/outputs/`).
+> Completed stages are automatically cached; re-run specific stages with
+> `--force detect track` or all stages with `--force`.
+
+---
+
+## 4. Evaluation, Ablations (`A1–A8`) & Figures
+
+Ablation experiments are defined in `src/football_vision/eval/ablation.py` and run on
+top of a completed base run, writing CSV tables to `reports/tables/`:
+
+```bash
+# Example: A5 (SORT vs ByteTrack)
+uv run python scripts/run_ablation.py --ablation A5 \
+    --config configs/fixed_camera.yaml \
+    --set run_name=base_c004 \
+    --set video.path=data/raw/v_HdiyOtliFiw_c004.mp4 \
+    --mot-gt data/annotations/v_HdiyOtliFiw_c004_mot.txt \
+    --output-dir reports/tables
+```
+
+Generate all report figures (`homography_error.png`, `heatmap_*.png`,
+`speed_distribution.png`, `team_shape_*.png`, `pipeline_steps_*.png`, `filmstrip.png`)
+into `reports/figures/`:
+
+```bash
+uv run python scripts/make_figures.py \
+    --run-dir outputs/base_c004_f675 \
+    --compare-run-dir outputs/base_c004_f675_A7_savgol_0 \
+    --frame-id 850 \
+    --output-dir reports/figures
+```
+
+Standalone evaluation scripts: `scripts/eval_homography.py`,
+`scripts/eval_detection.py`, `scripts/eval_tracking.py`. Logged experiment results live
+in [reports/experiments.md](reports/experiments.md).
+
+---
+
+## 5. Testing & Branch Coverage
+
+`uv run pytest` automatically runs the entire suite with **branch coverage** enabled
+and writes an HTML coverage report to `htmlcov/index.html` (`addopts` in
+`pyproject.toml`):
+
+```bash
+uv run pytest                                   # full suite + terminal & HTML branch coverage
+uv run pytest --no-cov                          # fast test run without coverage instrumentation
+uv run ruff format --check . && uv run ruff check . && uv run pydoclint src tests scripts demo
+```
+
+See [tests/README.md](tests/README.md) for detailed test commands, filtering, and
+suite layout.
+
+---
+
+## 6. Pipeline Stages & Implementation Status
+
+| Stage (`--stages`) | Phase | Package | Main artifacts | Owner / Status |
 |---|---|---|---|---|
-| `preprocess` | P1 | `preprocessing` | `meta.json`, `pitch_mask/` | A |
-| `pitch_lines` | P2 | `pitch` | `pitch_lines.csv` | A |
-| `homography` | P3 | `homography` | `homography.npy`, `homography_quality.csv` | B |
-| `detect` | P4 | `detection` | `detections.csv` | C |
-| `track` | P5 | `tracking` | `tracks.csv` | C |
-| `team` | P6 | `team` | `team_labels.csv` (+ team/role in `tracks.csv`) | C |
-| `project` | P7 | `analytics` | `pitch_xy.csv` | D |
-| `analytics` | P7 | `analytics` | `analytics/` (heatmaps, team shape, kinematics) | D |
-| `render` | P8 | `viz` | `outputs/overlay.mp4` or `outputs/side_by_side.mp4` | D |
+| `preprocess` | P1 | `preprocessing` | `meta.json`, `pitch_mask/` | (A) Implemented, tested |
+| `pitch_lines` | P2 | `pitch` | `pitch_lines.csv` | (A) Implemented, tested |
+| `homography` | P3 | `homography` | `homography.npy`, `homography_quality.csv` | (B) Implemented, tested |
+| `detect` | P4 | `detection` | `detections.csv` | (C) Implemented, tested |
+| `track` | P5 | `tracking` | `tracks.csv` | (C) Implemented, tested |
+| `team` | P6 | `team` | `team_labels.csv` (+ team/role in `tracks.csv`) | (C) Implemented, tested |
+| `project` | P7 | `analytics` | `pitch_xy.csv` | (D) Implemented, tested |
+| `analytics` | P7 | `analytics` | `analytics/` (heatmaps, team shape, kinematics) | (D) Implemented, tested |
+| `render` | P8 | `viz` | `outputs/overlay.mp4` or `outputs/side_by_side.mp4` | (D) Implemented, tested |
 
-Evaluation (P9) lives in `football_vision.eval` and `scripts/eval_*.py`.
-Owners A-D follow section 6 of the plan: A = data and pitch geometry, B = homography and
-camera, C = detection, tracking and teams, D = analytics, visualization and integration.
+---
 
-## Implementation status
-
-| Area | Status |
-|---|---|
-| Config, artifacts (data contract), video I/O, logging, boxes, pipeline runner and stages | Implemented, tested |
-| `preprocessing.frames`, `pitch.template`, `homography.geometry`, `analytics.*` | Implemented, tested |
-| `detection` (YOLO wrapper, filters), `viz.overlay/topdown/render`, `eval` helpers, ablation runner | Implemented, tested |
-| OpenCV baselines: `homography.keyframe.homography_from_landmarks`, `propagate_homography` | Implemented, tested |
-| `preprocessing.shots`, `preprocessing.pitch_mask`, `pitch.edges/hough/keypoints` | Implemented (A), tested |
-| `homography.dlt`, `homography.ransac`, `keyframe`, `propagation`, `smoothing`, `quality` | Implemented (B), tested |
-| `detection.tiling`, `tracking` (Kalman, assignment, SORT, ByteTrack, stitching), `team.*`, `eval.detection`, `eval.tracking.evaluate_tracking` | Implemented (C), tested |
-| `viz.figures`, `viz.render.make_filmstrip` | Implemented (D), tested |
-
-Find all open work with `grep -rn "TODO(" src`. Each stub raises `NotImplementedError`
-and documents its algorithm, arguments and result. Contract tests live in
-`tests/test_contracts.py` and are marked `xfail`: remove the marker once you implement the
-function so the test guards your code.
-
-## Repository layout
+## 7. Repository Layout & Data Contract
 
 ```text
 football-vision/
+├── pyproject.toml      # Project metadata, extras, uv dependency-groups, pytest/ruff/pydoclint/coverage config
+├── uv.lock             # Locked dependency graph for reproducible `uv sync`
+├── Makefile            # Shortcut targets (`install`, `check`, `test`, `coverage`, `run`)
 ├── configs/            # YAML: default (reference), walking_skeleton, fixed_camera, broadcast
-├── data/               # raw video + annotations (git-ignored); see data/README.md
-├── demo/               # Streamlit app: streamlit run demo/streamlit_app.py -- --run-dir outputs/<run>
-├── docs/               # project plan (Vietnamese) and the draw.io pipeline diagram
-├── notebooks/          # exploration only; no core logic
-├── reports/            # figures/, tables/, experiments.md
+├── data/               # Raw video + annotations (git-ignored); see data/README.md
+├── demo/               # streamlit_app.py + bundled sample_run/ (~3 MB) for instant demo
+├── docs/               # Project plan (Vietnamese) and draw.io pipeline diagram
+├── reports/            # figures/, tables/ablation_A*.csv, experiments.md
 ├── scripts/            # run_pipeline, annotate_landmarks, eval_*, run_ablation, make_figures
 ├── src/football_vision/
 │   ├── config.py  artifacts.py  video.py  boxes.py  datatypes.py  constants.py  errors.py  utils.py
 │   ├── preprocessing/  pitch/  homography/  detection/  tracking/  team/   # P1-P6
 │   ├── analytics/  viz/  eval/                                              # P7-P9
 │   └── pipeline/       # Stage classes and PipelineRunner
-└── tests/              # unit, integration and contract tests
+└── tests/              # Unit, integration, contract tests + tests/README.md
 ```
 
-The plan lists the packages directly under `src/`; they are nested in the
-`football_vision` package here so that `import football_vision.homography` works after
-`pip install -e .`.
-
-## Conventions and data contract
-
-* **Image coordinates**: pixels, origin top-left, `x` right, `y` down (frames are resized to
-  `video.size`, default 1280x720).
-* **Pitch coordinates**: meters, origin top-left of the top-down map, `X` along the length
-  (0-105 m), `Y` along the width (0-68 m).
+* **Image coordinates**: pixels, origin top-left, `x` right, `y` down (default `1280x720`).
+* **Pitch coordinates**: meters, origin top-left of the top-down map, `X` in `0–105 m`, `Y` in `0–68 m`.
 * `frame_id` is 0-based; time is `frame_id / fps`.
-* A homography **always maps image -> pitch**; use the inverse to draw the pitch on a frame.
-* Project the **foot point** (bottom-center of the box), never the box center: the
-  homography is only valid on the ground plane.
+* A homography **always maps image -> pitch**; project **foot points** (bottom-center of box), never box centers.
 
-| Artifact | Columns / content |
-|---|---|
-| `meta.json` | source, fps, width, height, n_frames, shots |
-| `pitch_lines.csv` | frame_id, x1, y1, x2, y2, orient, score |
-| `homography.npy` + `homography_quality.csv` | (T, 3, 3) matrices; frame_id, valid, n_inliers, reproj_err_m, overlay_score |
-| `detections.csv` | frame_id, x1, y1, x2, y2, conf, cls |
-| `tracks.csv` | frame_id, track_id, x1, y1, x2, y2, conf, team, role |
-| `team_labels.csv` | track_id, team, role (extension of the plan, written by stage `team`) |
-| `pitch_xy.csv` | frame_id, track_id, X, Y, team, role, valid |
-| `ball.csv` | frame_id, x, y, conf, interpolated (optional Level 4) |
-
-Schemas are enforced by `ArtifactStore`; they are defined in `football_vision/artifacts.py`.
-
-## Configuration
-
-Configuration is a tree of dataclasses (`football_vision/config.py`). Layer YAML files and
-override single values from the command line:
-
-```bash
-python scripts/run_pipeline.py -c configs/default.yaml -c configs/fixed_camera.yaml \
-    --set video.path=data/raw/clip.mp4 --set detection.imgsz=960 --stages preprocess detect
-```
-
-Every run stores its resolved `config.yaml`, `timings.json` and `run.log` next to the
-artifacts, so results are reproducible.
-
-## Typical workflow
-
-1. Put a clip in `data/raw/` and run the walking skeleton.
-2. Click landmarks: `python scripts/annotate_landmarks.py --video <clip> --output data/annotations/landmarks_clip.json`.
-3. Run `configs/fixed_camera.yaml` (Level 2) and add `team` to `stages` once P6 is implemented (Level 3).
-4. Evaluate: `scripts/eval_homography.py`, `scripts/eval_detection.py`, `scripts/eval_tracking.py`.
-5. Compare variants with `scripts/run_ablation.py --ablation A5` (A1-A8 are defined in `eval/ablation.py`).
-6. Create report figures with `scripts/make_figures.py` and log experiments in `reports/experiments.md`.
-
-## Development
-
-* `make check` runs `ruff check`, `pydoclint` and `pytest`; `make format` formats the code.
-* Code is **English**, typed, and documented with **Google-style docstrings**; see
-  [CONTRIBUTING.md](CONTRIBUTING.md) for the rules and the Git workflow.
-* CI (`.github/workflows/ci.yml`) runs the same checks on Python 3.10-3.12.
-
-## Data and licensing
-
-Do not commit raw video (copyright, size). `data/README.md` explains the layout and the
-annotation formats. Cite every dataset and model in the report. The code is released under
-the MIT license (`LICENSE`); replace it if your course requires another one.
+Schemas are enforced by `ArtifactStore` (`src/football_vision/artifacts.py`). Rules and
+docstring style live in [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -10,6 +12,7 @@ from sklearn.cluster import KMeans
 from football_vision.artifacts import TEAM_LABEL_COLUMNS
 from football_vision.config import TeamConfig
 from football_vision.constants import (
+    PITCH_LENGTH_M,
     ROLE_GOALKEEPER,
     ROLE_PLAYER,
     ROLE_REFEREE,
@@ -19,6 +22,8 @@ from football_vision.constants import (
 
 _GK_EXTREME_X_RATIO = 0.08
 _MIN_TRACKS_FOR_GK_HEURISTIC = 4
+_LAB_CHANNEL_WEIGHTS = np.array([0.35, 1.0, 1.0], dtype=np.float64)
+_GK_PITCH_X_MARGIN_M = 12.0
 
 
 class TeamClassifier:
@@ -41,6 +46,15 @@ class TeamClassifier:
         self.cfg = cfg
         self._model: KMeans | None = None
 
+    def _prepare_features(
+        self, features: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """Downweights Lab luminance so striped kits cluster by chromaticity."""
+        x = np.asarray(features, dtype=np.float64)
+        if self.cfg.color_space == "lab" and x.ndim == 2 and x.shape[1] == 3:
+            return x * _LAB_CHANNEL_WEIGHTS
+        return x
+
     def fit(self, features: npt.NDArray[np.float64]) -> None:
         """Learns the color clusters.
 
@@ -55,6 +69,7 @@ class TeamClassifier:
             raise ValueError(
                 f"Expected non-empty 2D feature array, got shape {x.shape}"
             )
+        x = self._prepare_features(x)
         unique_rows = len(np.unique(np.round(x, decimals=6), axis=0))
         n_clusters = max(1, min(int(self.cfg.n_clusters), len(x), unique_rows))
         self._model = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
@@ -80,7 +95,7 @@ class TeamClassifier:
             raise ValueError(f"Expected 2D feature array, got shape {x.shape}")
         if len(x) == 0:
             return np.empty(0, dtype=np.int64)
-        return self._model.predict(x).astype(np.int64)
+        return self._model.predict(self._prepare_features(x)).astype(np.int64)
 
 
 def vote_per_track(samples: pd.DataFrame) -> pd.DataFrame:
@@ -114,8 +129,17 @@ def _classify_outlier_role(
     x_min: float,
     x_span: float,
     n_total_tracks: int,
+    pitch_x_by_track: Mapping[int, float] | None = None,
 ) -> str:
-    """Distinguishes edge-bound goalkeepers from a central-play referee."""
+    """Distinguishes goal-line goalkeepers from a central-play referee."""
+    if pitch_x_by_track is not None and track_id in pitch_x_by_track:
+        px = float(pitch_x_by_track[track_id])
+        if np.isfinite(px):
+            if px <= _GK_PITCH_X_MARGIN_M or px >= (
+                PITCH_LENGTH_M - _GK_PITCH_X_MARGIN_M
+            ):
+                return ROLE_GOALKEEPER
+            return ROLE_REFEREE
     if n_total_tracks < _MIN_TRACKS_FOR_GK_HEURISTIC or x_span <= 0.0:
         return ROLE_REFEREE
     rows = tracks[tracks["track_id"] == track_id]
@@ -132,6 +156,7 @@ def assign_teams_and_roles(
     track_clusters: pd.DataFrame,
     tracks: pd.DataFrame,
     cfg: TeamConfig,
+    pitch_x_by_track: Mapping[int, float] | None = None,
 ) -> pd.DataFrame:
     """Maps color clusters to teams and roles.
 
@@ -143,6 +168,8 @@ def assign_teams_and_roles(
         track_clusters: Output of :func:`vote_per_track`.
         tracks: Full ``tracks.csv`` table, used for position-based rules.
         cfg: Team settings.
+        pitch_x_by_track: Optional mapping from ``track_id`` to median metric pitch
+            ``X`` coordinate (meters) used to place goalkeepers near the goal lines.
 
     Returns:
         Table with the columns of ``TEAM_LABEL_COLUMNS``: ``track_id``, ``team``
@@ -196,6 +223,8 @@ def assign_teams_and_roles(
         elif cid in team_clusters:
             rows.append((tid, team_clusters[cid], ROLE_PLAYER))
         else:
-            role = _classify_outlier_role(tid, tracks, x_min, x_span, n_total)
+            role = _classify_outlier_role(
+                tid, tracks, x_min, x_span, n_total, pitch_x_by_track
+            )
             rows.append((tid, TEAM_UNKNOWN, role))
     return pd.DataFrame(rows, columns=list(TEAM_LABEL_COLUMNS))
